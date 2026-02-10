@@ -1,5 +1,6 @@
 mod cli;
 mod env;
+mod github;
 
 use std::process::ExitCode;
 

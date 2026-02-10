@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 use crate::env;
+use crate::github;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -31,13 +32,6 @@ enum Commands {
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
 
-    let command = match cli.command {
-        Commands::New { .. } => "new",
-        Commands::Status => "status",
-        Commands::Sync => "sync",
-        Commands::Push => "push",
-    };
-
     let preflight = match env::run_preflight() {
         Ok(preflight) => preflight,
         Err(message) => {
@@ -47,6 +41,34 @@ pub fn run() -> ExitCode {
     };
     let _ = preflight.default_branch;
 
-    eprintln!("error: `stck {command}` is not implemented yet");
-    ExitCode::from(1)
+    match cli.command {
+        Commands::Status => {
+            let pr = match github::pr_for_head(&preflight.current_branch) {
+                Ok(pr) => pr,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+
+            let _ = pr.merged_at;
+            println!(
+                "PR #{} state={} base={} head={}",
+                pr.number, pr.state, pr.base_ref_name, pr.head_ref_name
+            );
+            ExitCode::SUCCESS
+        }
+        Commands::New { .. } => {
+            eprintln!("error: `stck new` is not implemented yet");
+            ExitCode::from(1)
+        }
+        Commands::Sync => {
+            eprintln!("error: `stck sync` is not implemented yet");
+            ExitCode::from(1)
+        }
+        Commands::Push => {
+            eprintln!("error: `stck push` is not implemented yet");
+            ExitCode::from(1)
+        }
+    }
 }

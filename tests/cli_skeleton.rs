@@ -86,6 +86,15 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+  if [[ "${STCK_TEST_PR_VIEW_FAIL:-0}" == "1" ]]; then
+    echo "no pull requests found for branch" >&2
+    exit 1
+  fi
+  echo '{"number":101,"headRefName":"feature-branch","baseRefName":"main","state":"OPEN","mergedAt":null}'
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -118,7 +127,7 @@ fn help_lists_all_commands() {
 
 #[test]
 fn commands_show_placeholder_when_preflight_passes() {
-    for command in ["new", "status", "sync", "push"] {
+    for command in ["new", "sync", "push"] {
         let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
         if command == "new" {
             cmd.args([command, "feature-x"]);
@@ -132,6 +141,16 @@ fn commands_show_placeholder_when_preflight_passes() {
                 "error: `stck {command}` is not implemented yet"
             )));
     }
+}
+
+#[test]
+fn status_prints_single_pr_details() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.arg("status");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "PR #101 state=OPEN base=main head=feature-branch",
+    ));
 }
 
 #[test]
@@ -175,5 +194,16 @@ fn shows_detached_head_remediation() {
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: not on a branch (detached HEAD); checkout a branch and retry",
+    ));
+}
+
+#[test]
+fn status_shows_missing_pr_remediation() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_PR_VIEW_FAIL", "1");
+    cmd.arg("status");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: no PR found for branch feature-branch; create a PR first",
     ));
 }

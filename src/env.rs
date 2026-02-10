@@ -2,6 +2,7 @@ use std::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct PreflightContext {
+    pub current_branch: String,
     pub default_branch: String,
 }
 
@@ -10,11 +11,14 @@ pub fn run_preflight() -> Result<PreflightContext, String> {
     ensure_command_available("gh")?;
     ensure_gh_auth()?;
     ensure_origin_remote()?;
-    ensure_on_branch()?;
+    let current_branch = ensure_on_branch()?;
     ensure_clean_working_tree()?;
     let default_branch = discover_default_branch()?;
 
-    Ok(PreflightContext { default_branch })
+    Ok(PreflightContext {
+        current_branch,
+        default_branch,
+    })
 }
 
 fn ensure_command_available(command: &str) -> Result<(), String> {
@@ -64,7 +68,7 @@ fn ensure_origin_remote() -> Result<(), String> {
     }
 }
 
-fn ensure_on_branch() -> Result<(), String> {
+fn ensure_on_branch() -> Result<String, String> {
     let output = Command::new("git")
         .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
         .output()
@@ -73,7 +77,7 @@ fn ensure_on_branch() -> Result<(), String> {
         })?;
 
     if output.status.success() {
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         Err("not on a branch (detached HEAD); checkout a branch and retry".to_string())
     }
