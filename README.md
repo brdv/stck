@@ -9,6 +9,8 @@
 - `stck sync`: **local-only** restack + rebase the entire stack
 - `stck push`: push rewritten branches and update PR base branches on GitHub
 
+**Additional entrypoint:** `git stck ...` works via a `git-stck` symlink installed by Homebrew.
+
 Design goal: **v0.1 correctness of `stck sync`** (restack/rebase the whole PR chain locally every time).
 
 ---
@@ -19,7 +21,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 
 ---
 
-## Goals (v0.1)
+## Goals
 
 - Deterministic, **linear-stack** workflow: `main <- A <- B <- C` (no branching stacks in v0.1).
 - PRs are **required** for any branch in the stack.
@@ -35,6 +37,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
   - If current branch is not pushed / PR missing: auto-push + auto-create PR
   - Create new branch stacked on current branch and create ready-for-review PR (v0.1 deterministic)
 - Verbose-by-default: prints every command it runs.
+- Distribution via **Homebrew**, including `git-stck` symlink for `git stck ...`.
 
 ---
 
@@ -65,6 +68,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 1. **Create stack:** On branch A, run `stck new feature-b` → pushes A (if needed), creates PR A (if needed), creates branch B and PR B targeting A.
 2. **Upstream merge:** PR A merges. On branch C, run `stck sync` → restacks B onto `main`, C onto B, rewrites locally. Then it tells me to run `stck push`.
 3. **Conflicts:** During `stck sync`, a rebase conflicts. I resolve using Git’s normal flow, then rerun `stck sync` (or `--continue`) to proceed.
+4. **Git-native invocation:** In a repo, run `git stck status` to get the same output as `stck status`.
 
 ---
 
@@ -146,6 +150,22 @@ Behavior:
 
 ---
 
+## Git subcommand entrypoint (`git stck`)
+
+Git will run `git-stck` when the user invokes `git stck ...`.
+
+v0.1 distribution installs:
+
+- `stck` binary (canonical)
+- `git-stck` symlink → `stck`
+
+So both of these work identically:
+
+- `stck status`
+- `git stck status`
+
+---
+
 ## Stack discovery via GitHub (`gh`)
 
 Primary source of truth is PR metadata:
@@ -222,6 +242,7 @@ To support robust resume/repeatability, store last computed plan in repo-local e
 - Rust CLI using `clap`
 - Execute `git` and `gh` commands as subprocesses (no libgit2 required).
 - Always print the exact command before running it (v0.1).
+- Single binary `stck`; Homebrew installs `git-stck` symlink.
 
 ### Modules
 
@@ -231,6 +252,7 @@ To support robust resume/repeatability, store last computed plan in repo-local e
 - `stack/`: stack discovery + linearity enforcement + plan generation
 - `gitops/`: rebase/push primitives (shell out), rebase state detection
 - `ui/`: printing plan/status consistently
+- `release/`: (optional) release helpers, version printing, etc.
 
 ### Testing strategy
 
@@ -344,3 +366,86 @@ Acceptance:
 
 - Works from a branch with no upstream and no PR.
 - Produces a stacked PR.
+
+---
+
+## Milestone 8: Homebrew release cycle (after core features)
+
+### Objectives
+
+- Provide a stable installation story:
+  - `brew install <tap>/stck`
+  - installs `stck` and also enables `git stck ...` via a `git-stck` symlink
+- Release process is repeatable and automation-friendly.
+
+### Release artifacts
+
+- GitHub Release per version tag `vX.Y.Z`
+- Attach prebuilt tarballs per platform/arch (at least macOS):
+  - `stck-vX.Y.Z-x86_64-apple-darwin.tar.gz`
+  - `stck-vX.Y.Z-aarch64-apple-darwin.tar.gz`
+- Each tarball contains:
+  - `stck` binary
+  - (optional) `LICENSE`, `README.md`
+- Generate and publish SHA256 checksums for each tarball.
+
+### CI / CD (GitHub Actions)
+
+Workflow outline:
+
+1. Trigger on version tag push: `v*`
+2. Build matrix:
+   - `aarch64-apple-darwin`
+   - `x86_64-apple-darwin`
+3. Build steps:
+   - `cargo build --release`
+   - package into tar.gz
+   - compute sha256
+4. Publish GitHub Release with artifacts + checksums
+
+### Homebrew distribution strategy
+
+Two common options; pick one:
+
+**Option A: Homebrew Tap (recommended for v0.1)**
+
+- Create a tap repo: `brew tap <org>/stck`
+- Add formula `Formula/stck.rb` that:
+  - downloads the correct tarball for macOS arch
+  - installs `stck`
+  - installs symlink `git-stck` → `stck`
+- Update formula URLs + sha256 on each release.
+
+**Option B: Homebrew Core (later)**
+
+- After tool matures, submit to `homebrew-core` (higher bar, slower iteration).
+
+### Formula behavior (key requirement: `git-stck` symlink)
+
+In the formula’s `install`:
+
+- `bin.install "stck"`
+- `bin.install_symlink "stck" => "git-stck"`
+
+Acceptance:
+
+- After install: `stck --help` works
+- After install: `git stck --help` works
+- `which git-stck` shows it’s installed by brew
+
+### Versioning
+
+- Embed version string in binary: `stck --version` prints `X.Y.Z`
+- Release tags must match binary version.
+
+### Post-release checklist
+
+- Verify install on both Apple Silicon + Intel (or via CI runner + local smoke test)
+- Verify `git stck status` in a real repo
+- Update README install instructions (Homebrew + Git subcommand note)
+
+Acceptance for Milestone 8:
+
+- Tagging `v0.1.0` produces a GitHub Release with macOS artifacts
+- `brew install <tap>/stck` installs successfully
+- Both `stck` and `git stck` function end-to-end for `status` at minimum
