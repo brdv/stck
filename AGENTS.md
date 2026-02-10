@@ -53,6 +53,7 @@
 - The agent does local working-tree changes only.
 - The agent must not create branches, commit, push, or open/manage PRs.
 - All branch/commit/PR operations are performed manually by the user.
+- When asked for PR descriptions, use `./github/pull_request_template.md`
 
 ## Collaboration Style
 
