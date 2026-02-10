@@ -23,7 +23,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 
 ## Goals
 
-- Deterministic, **linear-stack** workflow: `main <- A <- B <- C` (no branching stacks in v0.1).
+- Deterministic, **linear-stack** workflow: `<default> <- A <- B <- C` (no branching stacks in v0.1).
 - PRs are **required** for any branch in the stack.
 - `stck sync`:
   - Detect stack from GitHub PR bases (via `gh`)
@@ -31,8 +31,9 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
   - Rebase stack in order using `git rebase --onto`
   - Stop on conflicts; support resume by re-running `stck sync` or `stck sync --continue`
 - `stck push`:
-  - Apply any PR base retargeting (via `gh`/API)
   - Push all involved branches to `origin` using `--force-with-lease`
+  - Apply PR base retargeting (via `gh`/API) after push succeeds
+  - Be idempotent on retry: recompute and apply only remaining work
 - `stck new`:
   - If current branch is not pushed / PR missing: auto-push + auto-create PR
   - Create new branch stacked on current branch and create ready-for-review PR (v0.1 deterministic)
@@ -56,8 +57,8 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 
 - `gh` installed and authenticated
 - GitHub repo remote exists as `origin` and points to GitHub
-- Default base branch is `main` (configurable later)
-- All branches in the stack have open PRs
+- Default base branch is discovered from repo metadata (`origin`/GitHub default branch), not hardcoded
+- Active stack branches have PRs; discovery must include `open` + `merged` states to handle merged ancestors
 - Working tree is clean (no uncommitted changes)
 - Stack is linear (exactly one child per base branch within the stack)
 
@@ -66,7 +67,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 ## User stories
 
 1. **Create stack:** On branch A, run `stck new feature-b` → pushes A (if needed), creates PR A (if needed), creates branch B and PR B targeting A.
-2. **Upstream merge:** PR A merges. On branch C, run `stck sync` → restacks B onto `main`, C onto B, rewrites locally. Then it tells me to run `stck push`.
+2. **Upstream merge:** PR A merges. On branch C, run `stck sync` → restacks B onto repo default branch, C onto B, rewrites locally. Then it tells me to run `stck push`.
 3. **Conflicts:** During `stck sync`, a rebase conflicts. I resolve using Git’s normal flow, then rerun `stck sync` (or `--continue`) to proceed.
 4. **Git-native invocation:** In a repo, run `git stck status` to get the same output as `stck status`.
 
@@ -79,7 +80,7 @@ Stacked PRs are great for review, but painful when upstream PRs merge or change:
 - Fetches (`git fetch origin`) for accuracy (v0.1 default).
 - Uses `gh` to locate the PR for current branch and walk the stack.
 - Prints:
-  - stack order: `main <- feature-a <- feature-b <- feature-c`
+  - stack order: `<default> <- feature-a <- feature-b <- feature-c`
   - for each: PR number, state (open/merged), baseRefName/headRefName
   - indicators:
     - base mismatch (PR base not equal to expected parent in stack)
@@ -95,7 +96,7 @@ Behavior:
 
 1. Validate clean working tree.
 2. Ensure current branch has upstream; if not, push `-u origin <current>`.
-3. Ensure current branch has PR; if not, create a ready PR targeting its current base (likely `main` unless already stacked).
+3. Ensure current branch has PR; if not, create a ready PR targeting its current base (likely repo default branch unless already stacked).
 4. Create and checkout new branch `<branch>` from current `HEAD`.
 5. Push new branch `-u origin <branch>`.
 6. Create PR for `<branch>` with base = current branch (stacked by default), ready-for-review.
@@ -113,11 +114,11 @@ Behavior:
 
 1. Validate clean working tree.
 2. Discover entire stack (ancestors + descendants) from current branch’s PR:
-   - Walk “down” via `baseRefName` until `main`
+   - Walk “down” via `baseRefName` until repo default branch
    - Walk “up” by finding PR(s) whose baseRefName equals the current head branch, recursively
    - Enforce linearity: each node has at most one child; else fail.
 3. Detect merged PRs in the chain:
-   - If a PR is merged, its child PR(s) must be restacked to the merged PR’s base (typically `main` or whatever its base was).
+   - If a PR is merged, its child PR(s) must be restacked to the merged PR’s base (typically repo default branch or whatever its base was).
 4. Plan:
    - For each branch `b` (bottom to top), compute `old_base` (previous PR base) and `new_base` (possibly updated due to merges).
    - Record intended PR base changes (but do **not** apply to GitHub yet).
@@ -137,9 +138,14 @@ At end:
 Behavior:
 
 1. Recompute stack + verify local state matches expected (or reuse cached plan from last sync if present).
-2. Apply PR base changes on GitHub (retarget PRs) where needed.
-3. Push all stack branches to `origin` with `--force-with-lease` (v0.1).
+2. Push all stack branches to `origin` with `--force-with-lease` (v0.1).
+3. Apply PR base changes on GitHub (retarget PRs) where needed.
 4. Print summary.
+
+Failure semantics:
+
+- If any push fails, do not apply PR retargeting.
+- If push succeeds but retargeting partially fails, report exact remaining retarget operations and make retry safe/idempotent.
 
 ---
 
@@ -176,12 +182,17 @@ Primary source of truth is PR metadata:
 Algorithm (linear stack):
 
 1. Identify current PR by head branch:  
-   `gh pr view --head <branch> --json number,headRefName,baseRefName,state`
-2. Walk ancestors by repeatedly looking up PR where `headRefName = baseRefName` (until `main`).
+   `gh pr view <branch> --json number,headRefName,baseRefName,state,mergedAt`
+2. Walk ancestors by repeatedly looking up PR where `headRefName = baseRefName` (until repo default branch).
 3. Walk descendants by searching PR whose `baseRefName = current headRefName` (must be ≤ 1 result).
 4. Fail if:
    - Missing PR at any step
    - More than one child PR for a base branch
+
+Implementation note:
+
+- Use `--state all` when listing PRs so merged ancestors remain discoverable.
+- Prefer a single graph snapshot fetch (GraphQL via `gh api graphql`) over many sequential calls to reduce race conditions.
 
 ---
 
@@ -190,9 +201,9 @@ Algorithm (linear stack):
 When a PR is merged (say PR A on branch `feature-a`):
 
 - Child PR B currently targets `feature-a`
-- After merge, B should target **A’s base** (typically `main`)
-- Locally, B should be rebased from old base `feature-a` onto new base `main`:
-  - `git rebase --onto main feature-a feature-b`
+- After merge, B should target **A’s base** (typically repo default branch)
+- Locally, B should be rebased from old base `feature-a` onto new base `<default>`:
+  - `git rebase --onto <default> feature-a feature-b`
 - Do this bottom-to-top to keep the chain consistent.
 
 We apply PR base changes during `stck push`, not `sync`.
@@ -223,15 +234,23 @@ v0.1 relies on Git’s native behavior:
 
 - Not required in v0.1; add later if needed.
 
-### Local run state (optional)
+### Local run state (required for in-progress operations)
 
 To support robust resume/repeatability, store last computed plan in repo-local ephemeral file (untracked), e.g. `.git/stck/last-plan.json`:
 
 - stack order
+- default branch at planning time
+- PR graph snapshot hash/version
 - intended PR base changes
 - per-branch rebase commands that were executed
+- push steps completed
+- retarget steps completed
 
-(If you want to keep _zero_ repo state, skip this and recompute from GitHub each time.)
+Resume/idempotency rules:
+
+- `stck sync --continue` must read local plan state and continue from the next unfinished step.
+- Plain `stck sync` may recompute only if no operation is in progress.
+- `stck push` retries must skip already-completed steps and apply only remaining pushes/retargets.
 
 ---
 
@@ -261,6 +280,7 @@ To support robust resume/repeatability, store last computed plan in repo-local e
   - Use a temporary git repo in tests.
   - Mock `gh` output (fixture JSON) to simulate PR graphs, merges, edge cases.
   - “Golden output” tests for `status` formatting.
+  - Failure injection tests for partial `stck push` success (push or retarget failures) and idempotent retry.
 
 ### Failure modes (explicit)
 
@@ -294,6 +314,7 @@ Acceptance:
 Checks:
 
 - `git`, `gh`, `gh auth status`, `origin` exists, on a branch, clean tree
+- discover and cache repo default branch (`origin`/GitHub metadata)
 
 Acceptance:
 
@@ -308,6 +329,7 @@ Acceptance:
 Acceptance:
 
 - For current branch, prints PR number, baseRefName, headRefName, state.
+- Uses command shape that works in `gh` (`gh pr view <branch> ...`), no unsupported flags.
 
 ---
 
@@ -319,6 +341,7 @@ Acceptance:
 
 - Given fixture PR graph, outputs ordered list.
 - Detects non-linearity and prints candidates.
+- Includes merged ancestors (`state=all`) and uses a single consistent snapshot where possible.
 
 ---
 
@@ -355,6 +378,8 @@ Acceptance:
 - Pushes all stack branches
 - Applies PR base updates (mocked in tests)
 - Fails transparently if push rejected
+- Guarantees safe ordering: no retarget before successful pushes
+- Supports idempotent retry after partial failure
 
 ---
 
