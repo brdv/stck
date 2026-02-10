@@ -39,23 +39,35 @@ pub fn run() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let _ = preflight.default_branch;
 
     match cli.command {
         Commands::Status => {
-            let pr = match github::pr_for_head(&preflight.current_branch) {
-                Ok(pr) => pr,
+            let stack = match github::discover_linear_stack(
+                &preflight.current_branch,
+                &preflight.default_branch,
+            ) {
+                Ok(stack) => stack,
                 Err(message) => {
                     eprintln!("error: {message}");
                     return ExitCode::from(1);
                 }
             };
 
-            let _ = pr.merged_at;
-            println!(
-                "PR #{} state={} base={} head={}",
-                pr.number, pr.state, pr.base_ref_name, pr.head_ref_name
-            );
+            let branch_chain = stack
+                .iter()
+                .map(|pr| pr.head_ref_name.as_str())
+                .collect::<Vec<_>>()
+                .join(" <- ");
+            println!("Stack: {} <- {}", preflight.default_branch, branch_chain);
+
+            for pr in stack {
+                let merged_at = pr.merged_at.as_deref().unwrap_or("none");
+                println!(
+                    "PR #{} state={} base={} head={} merged_at={}",
+                    pr.number, pr.state, pr.base_ref_name, pr.head_ref_name, merged_at
+                );
+            }
+
             ExitCode::SUCCESS
         }
         Commands::New { .. } => {

@@ -86,12 +86,23 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   exit 0
 fi
 
-if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
-  if [[ "${STCK_TEST_PR_VIEW_FAIL:-0}" == "1" ]]; then
-    echo "no pull requests found for branch" >&2
+if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
+  if [[ "${STCK_TEST_PR_LIST_FAIL:-0}" == "1" ]]; then
+    echo "failed to list pull requests" >&2
     exit 1
   fi
-  echo '{"number":101,"headRefName":"feature-branch","baseRefName":"main","state":"OPEN","mergedAt":null}'
+
+  if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" ]]; then
+    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child-a","baseRefName":"feature-branch","state":"OPEN","mergedAt":null},{"number":103,"headRefName":"feature-child-b","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
+    exit 0
+  fi
+
+  if [[ "${STCK_TEST_MISSING_CURRENT_PR:-0}" == "1" ]]; then
+    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"}]'
+    exit 0
+  fi
+
+  echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
   exit 0
 fi
 
@@ -144,13 +155,24 @@ fn commands_show_placeholder_when_preflight_passes() {
 }
 
 #[test]
-fn status_prints_single_pr_details() {
+fn status_discovers_linear_stack_in_order() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.arg("status");
 
-    cmd.assert().success().stdout(predicate::str::contains(
-        "PR #101 state=OPEN base=main head=feature-branch",
-    ));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Stack: main <- feature-base <- feature-branch <- feature-child",
+        ))
+        .stdout(predicate::str::contains(
+            "PR #100 state=MERGED base=main head=feature-base",
+        ))
+        .stdout(predicate::str::contains(
+            "PR #101 state=OPEN base=feature-base head=feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "PR #102 state=OPEN base=feature-branch head=feature-child",
+        ));
 }
 
 #[test]
@@ -200,10 +222,21 @@ fn shows_detached_head_remediation() {
 #[test]
 fn status_shows_missing_pr_remediation() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
-    cmd.env("STCK_TEST_PR_VIEW_FAIL", "1");
+    cmd.env("STCK_TEST_MISSING_CURRENT_PR", "1");
     cmd.arg("status");
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: no PR found for branch feature-branch; create a PR first",
+    ));
+}
+
+#[test]
+fn status_fails_on_non_linear_stack() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_NON_LINEAR", "1");
+    cmd.arg("status");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: non-linear stack detected at feature-branch; child candidates: feature-child-a, feature-child-b",
     ));
 }
