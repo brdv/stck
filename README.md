@@ -263,6 +263,75 @@ Resume/idempotency rules:
 - Always print the exact command before running it (v0.1).
 - Single binary `stck`; Homebrew installs `git-stck` symlink.
 
+### Implementation contract (v0.1 lock)
+
+This section freezes v0.1 implementation contracts so coding agents can execute without ambiguity.
+
+#### Locked crate set
+
+Runtime:
+
+- `clap` (with `derive`) for CLI parsing.
+- `serde` + `serde_json` for `gh` JSON parsing and local state persistence.
+- `anyhow` for top-level error propagation.
+- `thiserror` for typed domain errors and stable user-facing messages.
+- `tracing` + `tracing-subscriber` for structured logging (while still printing executed commands).
+
+Tests:
+
+- `assert_cmd` for CLI integration tests.
+- `predicates` for output assertions.
+- `tempfile` for temporary git repositories.
+- `serial_test` (optional) if tests need serialization to avoid repo state collisions.
+
+Defer until needed:
+
+- `toml` (only when config file parsing is implemented).
+- HTTP/API clients (for now, shell out via `gh`).
+- `git2`/`libgit2` (out of scope for v0.1 approach).
+
+#### CLI output contracts (initial, stable enough for tests)
+
+`stck status` success output:
+
+- First line: `Stack: <default> <- <b1> <- <b2> ...`
+- One line per branch in stack order:
+  - `<branch> PR #<n> [<state>] base=<base> head=<head> flags=<comma-separated-or-none>`
+- Final summary line:
+  - `Summary: needs_sync=<n> needs_push=<n> base_mismatch=<n>`
+
+Example:
+
+```
+Stack: main <- feature-a <- feature-b
+feature-a PR #101 [MERGED] base=main head=feature-a flags=none
+feature-b PR #102 [OPEN] base=feature-a head=feature-b flags=needs_sync
+Summary: needs_sync=1 needs_push=0 base_mismatch=0
+```
+
+Error output contract:
+
+- User-facing errors go to `stderr`.
+- Prefix all expected operational errors with `error:`.
+- Exit code `1` for operational/user-fixable failures.
+- Exit code `2` for usage/argument errors (from clap).
+
+Example errors:
+
+```
+error: working tree is not clean; commit, stash, or discard changes before running stck sync
+error: non-linear stack detected at feature-a; child candidates: feature-b, feature-c
+error: no PR found for branch feature-x; create a PR first
+```
+
+#### Local state contract (mandatory)
+
+- `.git/stck/last-plan.json` is required from the first implementation of `stck sync` and `stck push`.
+- `stck sync` must write/update this file before executing rebase steps.
+- `stck sync --continue` must read this file and continue from the next incomplete step.
+- `stck push` must record per-step progress (pushes and retargets) so retries are idempotent.
+- If state file is missing during `--continue`, fail with actionable remediation.
+
 ### Modules
 
 - `cli/`: argument parsing + help
