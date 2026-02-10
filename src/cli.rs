@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
+use crate::env;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "stck",
@@ -35,6 +37,15 @@ pub fn run() -> ExitCode {
         Commands::Sync => "sync",
         Commands::Push => "push",
     };
+
+    let preflight = match env::run_preflight() {
+        Ok(preflight) => preflight,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    let _ = preflight.default_branch;
 
     eprintln!("error: `stck {command}` is not implemented yet");
     ExitCode::from(1)

@@ -1,4 +1,5 @@
 mod cli;
+mod env;
 
 use std::process::ExitCode;
 
