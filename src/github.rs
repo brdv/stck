@@ -45,7 +45,18 @@ pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
 
     match output.status.code() {
         Some(0) => Ok(true),
-        Some(_) => Ok(false),
+        Some(_) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+            if stderr.contains("no pull requests found")
+                || stderr.contains("could not resolve to a pull request")
+            {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "failed to check PR for branch {branch}; ensure `gh auth status` succeeds and retry"
+                ))
+            }
+        }
         None => Err("failed to determine PR presence for branch".to_string()),
     }
 }
