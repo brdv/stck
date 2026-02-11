@@ -320,6 +320,16 @@ fn help_lists_all_commands() {
 }
 
 #[test]
+fn version_prints_package_version() {
+    let mut cmd = stck_cmd();
+    cmd.arg("--version");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
 fn commands_show_placeholder_when_preflight_passes() {
     let command = "new";
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();

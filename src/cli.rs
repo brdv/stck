@@ -10,7 +10,8 @@ use crate::sync_state::{self, PushState, SyncState};
 #[derive(Debug, Parser)]
 #[command(
     name = "stck",
-    about = "CLI for working with stacked GitHub pull requests"
+    about = "CLI for working with stacked GitHub pull requests",
+    version
 )]
 struct Cli {
     #[command(subcommand)]
