@@ -2,13 +2,54 @@
 
 `stck` is a Rust CLI for working with stacked GitHub pull requests.
 
+Stacked PRs improve review quality and throughput, but day-to-day maintenance can be tedious and error-prone. `stck` focuses on automating the repetitive mechanics while staying close to native `git` and `gh` behavior.
+
 ## Status
 
-This project is in active development.
+First public release (`v0.1.0`).
 
-- APIs and command behavior may change.
-- Workflows are being implemented incrementally.
-- Expect rough edges while core functionality is stabilized.
+## Basic Usage
+
+Command surface:
+
+```bash
+stck new <branch>
+stck status
+stck sync
+stck push
+```
+
+Git subcommand entrypoint is also installed (when installed via homebrew):
+
+```bash
+git stck <command>
+```
+
+## Installation
+
+### Homebrew (recommended)
+
+```bash
+brew tap brdv/stck https://github.com/brdv/stck
+brew install brdv/stck/stck
+```
+
+Verify installation:
+
+```bash
+stck --version
+stck --help
+git stck --help
+```
+
+### From source
+
+```bash
+cargo build --release --all-features
+./target/release/stck --help
+```
+
+Homebrew release details are documented in [`docs/release-homebrew.md`](./docs/release-homebrew.md).
 
 ## Goal
 
@@ -19,79 +60,10 @@ This project is in active development.
 - restack/rebase locally after upstream changes,
 - push rewritten branches and update PR base relationships.
 
-The long-form product and implementation plan lives in [`PLAN.md`](./PLAN.md).
+## Usage
 
-## Why stck
+For a step-by-step tutorial and command behavior details, see [`USAGE.md`](./USAGE.md).
 
-Stacked PRs improve review quality and throughput, but day-to-day maintenance can be tedious and error-prone. `stck` focuses on automating the repetitive mechanics while staying close to native `git` and `gh` behavior.
+## Contributing
 
-## Basic Usage
-
-Current command surface (in progress):
-
-```bash
-stck new <branch>
-stck status
-stck sync
-stck push
-```
-
-During development, run via Cargo:
-
-```bash
-cargo run -- <command>
-# example
-cargo run -- status
-```
-
-## Installation (Homebrew tap)
-
-Release automation and formula scaffolding are included for the Homebrew flow.
-
-After publishing a release, install via tap:
-
-```bash
-brew tap brdv/stck
-brew install stck
-```
-
-Both entrypoints are expected to work after install:
-
-```bash
-stck --help
-git stck --help
-```
-
-Homebrew release details are documented in [`docs/release-homebrew.md`](./docs/release-homebrew.md).
-
-## Command Intent
-
-- `stck new <branch>`: create and stack a new branch/PR on top of the current branch.
-- `stck status`: show detected stack order and PR state.
-- `stck sync`: restack/rebase the local stack based on current PR graph state.
-- `stck push`: push rewritten branches and reconcile PR base targeting.
-
-## Development
-
-For contributors working locally:
-
-```bash
-cargo fmt --all
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo build --all-features
-```
-
-## Milestones
-
-- [x] Milestone 0: Skeleton CLI (`new/status/sync/push` command scaffolding)
-- [x] Milestone 1: Environment + repository preflight checks
-- [x] Milestone 2: GitHub PR discovery (single PR)
-- [x] Milestone 3: Linear stack discovery (ancestors + descendants)
-- [x] Milestone 4: `stck status`
-- [x] Milestone 5: Rebase plan + executor (`stck sync`)
-- [x] Milestone 6: `stck push`
-- [ ] Milestone 7: `stck new`
-- [ ] Milestone 8: Homebrew release cycle
-
-Project-specific implementation details, milestone plans, and design constraints are documented in [`PLAN.md`](./PLAN.md).
+Development and validation commands live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
