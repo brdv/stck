@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use crate::env;
 use crate::github;
+use crate::stack;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -52,6 +53,7 @@ pub fn run() -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
+            let report = stack::build_status_report(&stack, &preflight.default_branch);
 
             let branch_chain = stack
                 .iter()
@@ -60,13 +62,21 @@ pub fn run() -> ExitCode {
                 .join(" <- ");
             println!("Stack: {} <- {}", preflight.default_branch, branch_chain);
 
-            for pr in stack {
-                let merged_at = pr.merged_at.as_deref().unwrap_or("none");
+            for line in report.lines {
+                let flags = if line.flags.is_empty() {
+                    "none".to_string()
+                } else {
+                    line.flags.join(",")
+                };
                 println!(
-                    "PR #{} state={} base={} head={} merged_at={}",
-                    pr.number, pr.state, pr.base_ref_name, pr.head_ref_name, merged_at
+                    "{} PR #{} [{}] base={} head={} flags={}",
+                    line.branch, line.number, line.state, line.base, line.head, flags
                 );
             }
+            println!(
+                "Summary: needs_sync={} needs_push={} base_mismatch={}",
+                report.summary.needs_sync, report.summary.needs_push, report.summary.base_mismatch
+            );
 
             ExitCode::SUCCESS
         }

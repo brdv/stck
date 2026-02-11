@@ -165,13 +165,16 @@ fn status_discovers_linear_stack_in_order() {
             "Stack: main <- feature-base <- feature-branch <- feature-child",
         ))
         .stdout(predicate::str::contains(
-            "PR #100 state=MERGED base=main head=feature-base",
+            "feature-base PR #100 [MERGED] base=main head=feature-base flags=none",
         ))
         .stdout(predicate::str::contains(
-            "PR #101 state=OPEN base=feature-base head=feature-branch",
+            "feature-branch PR #101 [OPEN] base=feature-base head=feature-branch flags=needs_sync",
         ))
         .stdout(predicate::str::contains(
-            "PR #102 state=OPEN base=feature-branch head=feature-child",
+            "feature-child PR #102 [OPEN] base=feature-branch head=feature-child flags=none",
+        ))
+        .stdout(predicate::str::contains(
+            "Summary: needs_sync=1 needs_push=0 base_mismatch=0",
         ));
 }
 
