@@ -12,7 +12,10 @@ pub fn fetch_origin() -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err("failed to fetch from `origin`; check remote connectivity and permissions".to_string())
+        Err(with_stderr(
+            "failed to fetch from `origin`; check remote connectivity and permissions",
+            &output.stderr,
+        ))
     }
 }
 
@@ -89,8 +92,11 @@ pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), S
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
+        Err(with_stderr(
+            &format!(
+                "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
+            ),
+            &output.stderr,
         ))
     }
 }
@@ -104,8 +110,9 @@ pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "push failed for branch {branch}; fix the push error and rerun `stck push`"
+        Err(with_stderr(
+            &format!("push failed for branch {branch}; fix the push error and rerun `stck push`"),
+            &output.stderr,
         ))
     }
 }
@@ -145,8 +152,9 @@ pub fn push_set_upstream(branch: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "failed to push branch {branch} with upstream; fix the push error and retry"
+        Err(with_stderr(
+            &format!("failed to push branch {branch} with upstream; fix the push error and retry"),
+            &output.stderr,
         ))
     }
 }
@@ -162,8 +170,11 @@ pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "failed to create and checkout branch {branch}; ensure the branch name is valid and does not already exist"
+        Err(with_stderr(
+            &format!(
+                "failed to create and checkout branch {branch}; ensure the branch name is valid and does not already exist"
+            ),
+            &output.stderr,
         ))
     }
 }
@@ -221,5 +232,14 @@ fn ref_exists(reference: &str) -> Result<bool, String> {
         _ => Err(format!(
             "failed to verify git reference `{reference}`; ensure this is a git repository"
         )),
+    }
+}
+
+fn with_stderr(base: &str, stderr: &[u8]) -> String {
+    let detail = String::from_utf8_lossy(stderr).trim().to_string();
+    if detail.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}; stderr: {detail}")
     }
 }
