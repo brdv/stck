@@ -147,6 +147,30 @@ pub fn run() -> ExitCode {
 fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     let current_branch = &preflight.current_branch;
 
+    let local_exists = match gitops::local_branch_exists(new_branch) {
+        Ok(exists) => exists,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    if local_exists {
+        eprintln!("error: branch {new_branch} already exists locally; choose a different name");
+        return ExitCode::from(1);
+    }
+
+    let remote_exists = match gitops::remote_branch_exists(new_branch) {
+        Ok(exists) => exists,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    if remote_exists {
+        eprintln!("error: branch {new_branch} already exists on origin; choose a different name");
+        return ExitCode::from(1);
+    }
+
     let has_upstream = match gitops::branch_has_upstream(current_branch) {
         Ok(has_upstream) => has_upstream,
         Err(message) => {
