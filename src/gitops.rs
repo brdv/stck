@@ -128,6 +128,14 @@ pub fn branch_has_upstream(branch: &str) -> Result<bool, String> {
     }
 }
 
+pub fn local_branch_exists(branch: &str) -> Result<bool, String> {
+    ref_exists(&format!("refs/heads/{branch}"))
+}
+
+pub fn remote_branch_exists(branch: &str) -> Result<bool, String> {
+    ref_exists(&format!("refs/remotes/origin/{branch}"))
+}
+
 pub fn push_set_upstream(branch: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["push", "-u", "origin", branch])
@@ -198,5 +206,20 @@ fn rev_parse(reference: &str) -> Result<String, String> {
         Err(format!("git reference `{reference}` resolved to empty SHA"))
     } else {
         Ok(sha)
+    }
+}
+
+fn ref_exists(reference: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", reference])
+        .output()
+        .map_err(|_| format!("failed to run `git show-ref` for `{reference}`"))?;
+
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "failed to verify git reference `{reference}`; ensure this is a git repository"
+        )),
     }
 }

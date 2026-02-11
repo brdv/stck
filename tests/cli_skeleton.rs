@@ -115,6 +115,25 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--git-dir" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "show-ref" && "${2:-}" == "--verify" && "${3:-}" == "--quiet" ]]; then
+  ref="${4:-}"
+  if [[ "${ref}" == refs/heads/* ]]; then
+    branch="${ref#refs/heads/}"
+    if [[ "${STCK_TEST_LOCAL_BRANCH_EXISTS:-}" == "${branch}" ]]; then
+      exit 0
+    fi
+    exit 1
+  fi
+  if [[ "${ref}" == refs/remotes/origin/* ]]; then
+    branch="${ref#refs/remotes/origin/}"
+    if [[ "${STCK_TEST_REMOTE_BRANCH_EXISTS:-}" == "${branch}" ]]; then
+      exit 0
+    fi
+    exit 1
+  fi
+  exit 1
+fi
+
 if [[ "${1:-}" == "rev-list" && "${2:-}" == "--count" ]]; then
   range="${3:-}"
   if [[ "${range}" == "refs/heads/feature-branch..refs/heads/feature-next" || "${range}" == "refs/heads/feature-branch..refs/heads/feature-x" ]]; then
@@ -413,6 +432,46 @@ fn new_reports_no_changes_for_new_branch_when_no_commits_exist() {
     cmd.assert().success().stdout(predicate::str::contains(
         "No changes in new stack item. Create PR for feature-next after adding commits.",
     ));
+}
+
+#[test]
+fn new_fails_when_new_branch_exists_locally() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-new-local-exists.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_LOCAL_BRANCH_EXISTS", "feature-next");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: branch feature-next already exists locally; choose a different name",
+    ));
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.is_empty(),
+        "new should fail before running side-effecting commands"
+    );
+}
+
+#[test]
+fn new_fails_when_new_branch_exists_on_origin() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-new-remote-exists.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_REMOTE_BRANCH_EXISTS", "feature-next");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: branch feature-next already exists on origin; choose a different name",
+    ));
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.is_empty(),
+        "new should fail before running side-effecting commands"
+    );
 }
 
 #[test]
