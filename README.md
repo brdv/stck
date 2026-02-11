@@ -68,7 +68,7 @@ cargo build --all-features
 - [x] Milestone 1: Environment + repository preflight checks
 - [x] Milestone 2: GitHub PR discovery (single PR)
 - [x] Milestone 3: Linear stack discovery (ancestors + descendants)
-- [ ] Milestone 4: `stck status`
+- [x] Milestone 4: `stck status`
 - [ ] Milestone 5: Rebase plan + executor (`stck sync`)
 - [ ] Milestone 6: `stck push`
 - [ ] Milestone 7: `stck new`
