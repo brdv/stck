@@ -152,6 +152,10 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                 }
             };
             let steps = stack::build_sync_plan(&stack, &preflight.default_branch);
+            if steps.is_empty() {
+                println!("Stack is already up to date. No sync needed.");
+                return ExitCode::SUCCESS;
+            }
 
             let state = SyncState {
                 steps,
@@ -228,6 +232,10 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
-    println!("Sync succeeded locally. Run `stck push` to update remotes + PR bases.");
+    if state.steps.is_empty() {
+        println!("Stack is already up to date. No sync needed.");
+    } else {
+        println!("Sync succeeded locally. Run `stck push` to update remotes + PR bases.");
+    }
     ExitCode::SUCCESS
 }

@@ -166,6 +166,11 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
     exit 0
   fi
 
+  if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
+    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN","mergedAt":null},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
+    exit 0
+  fi
+
   echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
   exit 0
 fi
@@ -258,6 +263,17 @@ fn sync_surfaces_rebase_failure_with_guidance() {
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
+}
+
+#[test]
+fn sync_reports_noop_when_stack_is_already_up_to_date() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_SYNC_NOOP", "1");
+    cmd.arg("sync");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Stack is already up to date. No sync needed.",
     ));
 }
 
