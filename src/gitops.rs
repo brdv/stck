@@ -179,6 +179,22 @@ pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
     }
 }
 
+pub fn checkout_branch(branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["checkout", branch])
+        .output()
+        .map_err(|_| "failed to run `git checkout`; ensure this is a git repository".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(with_stderr(
+            &format!("failed to checkout branch {branch}; switch branches manually and retry"),
+            &output.stderr,
+        ))
+    }
+}
+
 pub fn has_commits_between(base: &str, head: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args([

@@ -252,6 +252,8 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
 }
 
 fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode {
+    let original_branch = preflight.current_branch.clone();
+
     let existing_state = match sync_state::load_sync() {
         Ok(state) => state,
         Err(message) => {
@@ -427,6 +429,16 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
             eprintln!("error: {message}");
             return ExitCode::from(1);
         }
+    }
+
+    println!("$ git checkout {}", original_branch);
+    if let Err(message) = gitops::checkout_branch(&original_branch) {
+        if let Err(clear_error) = sync_state::clear() {
+            eprintln!("error: {clear_error}");
+            return ExitCode::from(1);
+        }
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
     }
 
     if let Err(message) = sync_state::clear() {
