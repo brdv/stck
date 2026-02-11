@@ -67,7 +67,7 @@ cargo build --all-features
 - [x] Milestone 0: Skeleton CLI (`new/status/sync/push` command scaffolding)
 - [x] Milestone 1: Environment + repository preflight checks
 - [x] Milestone 2: GitHub PR discovery (single PR)
-- [ ] Milestone 3: Linear stack discovery (ancestors + descendants)
+- [x] Milestone 3: Linear stack discovery (ancestors + descendants)
 - [ ] Milestone 4: `stck status`
 - [ ] Milestone 5: Rebase plan + executor (`stck sync`)
 - [ ] Milestone 6: `stck push`
