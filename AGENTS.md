@@ -19,6 +19,8 @@
 
 - Language: Rust.
 - Build, lint, format, and test using standard Cargo tooling.
+- When dogfooding `stck` during development, prefer `cargo run -- <command>` over a globally installed binary.
+- Use direct `git`/`gh` commands only when `stck` cannot perform the needed step yet; briefly document why.
 - Prefer Rust standard library and existing project code over adding dependencies.
 - If a dependency is not clearly necessary, implement functionality directly.
 - If adding a dependency is justified, keep it small, well-maintained, and scoped to the need.
@@ -40,6 +42,7 @@
   - Integration tests for CLI behavior (flags, output, exit codes).
 - Avoid flaky tests (timing-sensitive, network-dependent, environment-specific).
 - Run relevant Cargo tests when changes are applicable and testable.
+- For `sync`/`push` behavior changes, include coverage for fresh-run paths and stateful resume/reset paths when applicable.
 
 ## Safety Rules
 
@@ -54,6 +57,17 @@
 - The agent must not create branches, commit, push, or open/manage PRs.
 - All branch/commit/PR operations are performed manually by the user.
 - When asked for PR descriptions, use `./github/pull_request_template.md`
+- For stacked PR work, keep parent/child base relationships explicit in summaries and PR descriptions.
+
+## Planning & Scope
+
+- Keep review findings traceable: each finding should map to an active roadmap item or an explicit deferred item.
+- Prioritize correctness/reliability work before output/UX polish unless the user explicitly reprioritizes.
+- Preserve stable grep-friendly summary output unless output changes are explicitly scoped and documented.
+
+## Git Workflow Conventions
+
+- Before rebasing onto main, run `git fetch`, then rebase current branch onto `origin/main` (`git rebase origin/main`).
 
 ## Collaboration Style
 
