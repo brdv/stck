@@ -137,13 +137,78 @@ pub fn run() -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Commands::New { .. } => {
-            eprintln!("error: `stck new` is not implemented yet");
-            ExitCode::from(1)
-        }
+        Commands::New { branch } => run_new(&preflight, &branch),
         Commands::Sync { continue_sync } => run_sync(&preflight, continue_sync),
         Commands::Push => run_push(&preflight),
     }
+}
+
+fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
+    let current_branch = &preflight.current_branch;
+
+    let has_upstream = match gitops::branch_has_upstream(current_branch) {
+        Ok(has_upstream) => has_upstream,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if !has_upstream {
+        println!("$ git push -u origin {}", current_branch);
+        if let Err(message) = gitops::push_set_upstream(current_branch) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    let current_has_pr = match github::pr_exists_for_head(current_branch) {
+        Ok(exists) => exists,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if !current_has_pr {
+        println!(
+            "$ gh pr create --base {} --head {} --title {} --body \"\"",
+            preflight.default_branch, current_branch, current_branch
+        );
+        if let Err(message) =
+            github::create_pr(&preflight.default_branch, current_branch, current_branch)
+        {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    println!("$ git checkout -b {}", new_branch);
+    if let Err(message) = gitops::checkout_new_branch(new_branch) {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
+    println!("$ git push -u origin {}", new_branch);
+    if let Err(message) = gitops::push_set_upstream(new_branch) {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
+    println!(
+        "$ gh pr create --base {} --head {} --title {} --body \"\"",
+        current_branch, new_branch, new_branch
+    );
+    if let Err(message) = github::create_pr(current_branch, new_branch, new_branch) {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
+    println!(
+        "Created branch {} and opened a stacked PR targeting {}.",
+        new_branch, current_branch
+    );
+    ExitCode::SUCCESS
 }
 
 fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode {

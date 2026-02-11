@@ -110,6 +110,56 @@ pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
     }
 }
 
+pub fn branch_has_upstream(branch: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &format!("{branch}@{{upstream}}"),
+        ])
+        .output()
+        .map_err(|_| "failed to check branch upstream with `git rev-parse`".to_string())?;
+
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(_) => Ok(false),
+        None => Err("failed to check branch upstream".to_string()),
+    }
+}
+
+pub fn push_set_upstream(branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["push", "-u", "origin", branch])
+        .output()
+        .map_err(|_| "failed to run `git push -u`; ensure this is a git repository".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to push branch {branch} with upstream; fix the push error and retry"
+        ))
+    }
+}
+
+pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["checkout", "-b", branch])
+        .output()
+        .map_err(|_| {
+            "failed to run `git checkout -b`; ensure this is a git repository".to_string()
+        })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to create and checkout branch {branch}; ensure the branch name is valid and does not already exist"
+        ))
+    }
+}
+
 fn rev_parse(reference: &str) -> Result<String, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", reference])

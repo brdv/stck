@@ -97,6 +97,15 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
   fi
 fi
 
+if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--abbrev-ref" && "${3:-}" == "--symbolic-full-name" ]]; then
+  upstream_ref="${4:-}"
+  if [[ "${upstream_ref}" == "feature-branch@{upstream}" && "${STCK_TEST_HAS_UPSTREAM:-0}" == "1" ]]; then
+    echo "origin/feature-branch"
+    exit 0
+  fi
+  exit 1
+fi
+
 if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--git-dir" ]]; then
   if [[ -n "${STCK_TEST_GIT_DIR:-}" ]]; then
     echo "${STCK_TEST_GIT_DIR}"
@@ -136,6 +145,28 @@ if [[ "${1:-}" == "push" && "${2:-}" == "--force-with-lease" && "${3:-}" == "ori
     echo "$*" >> "${STCK_TEST_LOG}"
   fi
   if [[ "${STCK_TEST_PUSH_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "push" && "${2:-}" == "-u" && "${3:-}" == "origin" ]]; then
+  branch="${4:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_PUSH_U_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "checkout" && "${2:-}" == "-b" ]]; then
+  branch="${3:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_CHECKOUT_FAIL_BRANCH:-}" == "${branch}" ]]; then
     exit 1
   fi
   exit 0
@@ -195,6 +226,15 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+  branch="${3:-}"
+  if [[ "${STCK_TEST_HAS_CURRENT_PR:-0}" == "1" && "${branch}" == "feature-branch" ]]; then
+    echo '{"number":101}'
+    exit 0
+  fi
+  exit 1
+fi
+
 if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
   branch="${3:-}"
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
@@ -206,6 +246,27 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
     exit 1
   fi
   if [[ "${STCK_TEST_RETARGET_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+  base=""
+  head=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base) base="${2:-}"; shift 2 ;;
+      --head) head="${2:-}"; shift 2 ;;
+      --title) shift 2 ;;
+      --body) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "pr create --base ${base} --head ${head}" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_PR_CREATE_FAIL_HEAD:-}" == "${head}" ]]; then
     exit 1
   fi
   exit 0
@@ -250,11 +311,67 @@ fn commands_show_placeholder_when_preflight_passes() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.args([command, "feature-x"]);
 
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Created branch feature-x and opened a stacked PR targeting feature-branch.",
+    ));
+}
+
+#[test]
+fn new_bootstraps_current_branch_then_creates_stacked_branch_and_pr() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-new-bootstrap.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("new");
+    cmd.arg("feature-next");
+
     cmd.assert()
-        .code(1)
-        .stderr(predicate::str::contains(format!(
-            "error: `stck {command}` is not implemented yet"
-        )));
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git push -u origin feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"\"",
+        ))
+        .stdout(predicate::str::contains("$ git checkout -b feature-next"))
+        .stdout(predicate::str::contains("$ git push -u origin feature-next"))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base feature-branch --head feature-next --title feature-next --body \"\"",
+        ))
+        .stdout(predicate::str::contains(
+            "Created branch feature-next and opened a stacked PR targeting feature-branch.",
+        ));
+}
+
+#[test]
+fn new_skips_bootstrap_when_current_branch_has_upstream_and_pr() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-new-skip-bootstrap.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_HAS_UPSTREAM", "1");
+    cmd.env("STCK_TEST_HAS_CURRENT_PR", "1");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().success();
+
+    let log = fs::read_to_string(&log_path).expect("new log should exist");
+    assert!(!log.contains("push -u origin feature-branch"));
+    assert!(!log.contains("pr create --base main --head feature-branch"));
+    assert!(log.contains("checkout -b feature-next"));
+    assert!(log.contains("push -u origin feature-next"));
+    assert!(log.contains("pr create --base feature-branch --head feature-next"));
+}
+
+#[test]
+fn new_surfaces_checkout_failure() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_CHECKOUT_FAIL_BRANCH", "feature-next");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: failed to create and checkout branch feature-next; ensure the branch name is valid and does not already exist",
+    ));
 }
 
 #[test]
