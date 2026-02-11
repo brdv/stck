@@ -21,6 +21,8 @@ stck sync
 stck push
 ```
 
+`stck new <branch>` works both when starting from the default branch and when stacking on top of an existing branch.
+
 Git subcommand entrypoint is also installed (when installed via homebrew):
 
 ```bash

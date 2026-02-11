@@ -42,7 +42,7 @@ Use this command first whenever you are unsure if your branch is up to date.
 
 ### 2. Create the next stacked branch
 
-From your current stack branch:
+From your current branch:
 
 ```bash
 stck new feature-b
@@ -50,13 +50,16 @@ stck new feature-b
 
 `new` will:
 
-- ensure the current branch has an upstream on `origin`,
-- ensure the current branch has a PR (bootstraps if missing),
+- if current branch is not the default branch:
+  - ensure current branch has an upstream on `origin`,
+  - ensure current branch has a PR (bootstraps if missing),
 - create and checkout `feature-b` from current `HEAD`,
 - push `feature-b`,
-- create a PR for `feature-b` with base = current branch.
+- create a PR for `feature-b` with base:
+  - current branch (normal stacked flow), or
+  - default branch when starting a new stack from default branch.
 
-If the new branch has no commits beyond its base, `stck` does not create an empty PR and reports that PR creation should happen after adding commits.
+If the new branch has no commits beyond its base, `stck` does not create an empty PR and prints an explicit follow-up `gh pr create ...` command to run after adding commits.
 
 ### 3. Sync local stack after upstream changes
 
@@ -71,6 +74,16 @@ stck sync
 - It does not push or retarget PR bases yet.
 
 On success, it prints a follow-up message to run `stck push`.
+
+Recovery options:
+
+```bash
+# Continue an interrupted sync after resolving rebase conflicts
+stck sync --continue
+
+# Discard saved sync state and recompute from scratch
+stck sync --reset
+```
 
 ### 4. Push rewritten branches and retarget PR bases
 
