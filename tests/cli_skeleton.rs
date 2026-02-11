@@ -115,6 +115,20 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--git-dir" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "rev-list" && "${2:-}" == "--count" ]]; then
+  range="${3:-}"
+  if [[ "${range}" == "refs/heads/feature-branch..refs/heads/feature-next" || "${range}" == "refs/heads/feature-branch..refs/heads/feature-x" ]]; then
+    if [[ "${STCK_TEST_NEW_BRANCH_HAS_COMMITS:-0}" == "1" ]]; then
+      echo "1"
+    else
+      echo "0"
+    fi
+    exit 0
+  fi
+  echo "1"
+  exit 0
+fi
+
 if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
   ancestor="${3:-}"
   descendant="${4:-}"
@@ -312,7 +326,7 @@ fn commands_show_placeholder_when_preflight_passes() {
     cmd.args([command, "feature-x"]);
 
     cmd.assert().success().stdout(predicate::str::contains(
-        "Created branch feature-x and opened a stacked PR targeting feature-branch.",
+        "No changes in new stack item. Create PR for feature-x after adding commits.",
     ));
 }
 
@@ -322,6 +336,7 @@ fn new_bootstraps_current_branch_then_creates_stacked_branch_and_pr() {
     let log_path = std::env::temp_dir().join("stck-new-bootstrap.log");
     let _ = fs::remove_file(&log_path);
     cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
     cmd.arg("new");
     cmd.arg("feature-next");
 
@@ -351,6 +366,7 @@ fn new_skips_bootstrap_when_current_branch_has_upstream_and_pr() {
     cmd.env("STCK_TEST_LOG", log_path.as_os_str());
     cmd.env("STCK_TEST_HAS_UPSTREAM", "1");
     cmd.env("STCK_TEST_HAS_CURRENT_PR", "1");
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
     cmd.args(["new", "feature-next"]);
 
     cmd.assert().success();
@@ -371,6 +387,16 @@ fn new_surfaces_checkout_failure() {
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: failed to create and checkout branch feature-next; ensure the branch name is valid and does not already exist",
+    ));
+}
+
+#[test]
+fn new_reports_no_changes_for_new_branch_when_no_commits_exist() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "No changes in new stack item. Create PR for feature-next after adding commits.",
     ));
 }
 

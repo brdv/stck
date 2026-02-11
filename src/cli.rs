@@ -195,6 +195,21 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         return ExitCode::from(1);
     }
 
+    let has_commits = match gitops::has_commits_between(current_branch, new_branch) {
+        Ok(has_commits) => has_commits,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    if !has_commits {
+        println!(
+            "No changes in new stack item. Create PR for {} after adding commits.",
+            new_branch
+        );
+        return ExitCode::SUCCESS;
+    }
+
     println!(
         "$ gh pr create --base {} --head {} --title {} --body \"\"",
         current_branch, new_branch, new_branch

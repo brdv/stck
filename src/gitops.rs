@@ -160,6 +160,29 @@ pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
     }
 }
 
+pub fn has_commits_between(base: &str, head: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args([
+            "rev-list",
+            "--count",
+            &format!("refs/heads/{base}..refs/heads/{head}"),
+        ])
+        .output()
+        .map_err(|_| "failed to run `git rev-list --count`".to_string())?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "failed to compare branches {base} and {head}; ensure both branches exist locally"
+        ));
+    }
+
+    let count = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| "failed to parse commit count from `git rev-list --count`".to_string())?;
+    Ok(count > 0)
+}
+
 fn rev_parse(reference: &str) -> Result<String, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", reference])
