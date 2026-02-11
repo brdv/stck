@@ -22,6 +22,12 @@ pub struct PushState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastSyncPlan {
+    pub default_branch: String,
+    pub retargets: Vec<RetargetStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum LastPlanState {
     Sync(SyncState),
@@ -77,8 +83,46 @@ pub fn clear() -> Result<(), String> {
     fs::remove_file(&path).map_err(|_| format!("failed to remove sync state at {}", path.display()))
 }
 
+pub fn load_last_sync_plan() -> Result<Option<LastSyncPlan>, String> {
+    let path = last_sync_plan_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read(&path).map_err(|_| format!("failed to read state at {}", path.display()))?;
+    let plan = serde_json::from_slice::<LastSyncPlan>(&raw)
+        .map_err(|_| format!("failed to parse state at {}", path.display()))?;
+    Ok(Some(plan))
+}
+
+pub fn save_last_sync_plan(plan: &LastSyncPlan) -> Result<(), String> {
+    let path = last_sync_plan_path()?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "failed to compute parent directory for state file".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|_| format!("failed to create state directory {}", parent.display()))?;
+
+    let raw = serde_json::to_vec_pretty(plan)
+        .map_err(|_| "failed to serialize sync plan state".to_string())?;
+    fs::write(&path, raw).map_err(|_| format!("failed to write state at {}", path.display()))
+}
+
+pub fn clear_last_sync_plan() -> Result<(), String> {
+    let path = last_sync_plan_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_file(&path).map_err(|_| format!("failed to remove sync state at {}", path.display()))
+}
+
 pub fn state_file_path() -> Result<PathBuf, String> {
     Ok(gitops::git_dir()?.join("stck").join("last-plan.json"))
+}
+
+pub fn last_sync_plan_path() -> Result<PathBuf, String> {
+    Ok(gitops::git_dir()?.join("stck").join("last-sync-plan.json"))
 }
 
 fn load_raw_state(path: &PathBuf) -> Result<LastPlanState, String> {

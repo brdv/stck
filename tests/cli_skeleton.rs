@@ -632,6 +632,50 @@ fn push_resumes_after_partial_retarget_failure() {
 }
 
 #[test]
+fn push_uses_cached_sync_plan_retargets_when_available() {
+    let (temp, mut sync) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("push-cached-plan.log");
+    let _ = fs::remove_file(&log_path);
+
+    sync.env("STCK_TEST_LOG", log_path.as_os_str());
+    sync.arg("sync");
+    sync.assert().success();
+
+    let cached_plan_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-sync-plan.json");
+    assert!(
+        cached_plan_path.exists(),
+        "sync should persist cached sync plan"
+    );
+
+    let mut push = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    push.env("PATH", full_path);
+    push.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    push.env("STCK_TEST_LOG", log_path.as_os_str());
+    push.env("STCK_TEST_SYNC_NOOP", "1");
+    push.arg("push");
+
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ gh pr edit feature-branch --base main",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr edit feature-child --base feature-branch",
+        ));
+
+    assert!(
+        !cached_plan_path.exists(),
+        "push should clear cached sync plan after success"
+    );
+}
+
+#[test]
 fn sync_executes_rebase_plan_and_prints_success_message() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = std::env::temp_dir().join("stck-sync-rebase.log");
