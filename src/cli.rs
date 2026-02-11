@@ -30,8 +30,11 @@ enum Commands {
     /// Restack/rebase the local stack.
     Sync {
         /// Continue a previously interrupted sync run.
-        #[arg(long = "continue")]
+        #[arg(long = "continue", conflicts_with = "reset_sync")]
         continue_sync: bool,
+        /// Discard saved sync state and recompute sync from scratch.
+        #[arg(long = "reset", conflicts_with = "continue_sync")]
+        reset_sync: bool,
     },
     /// Push rewritten branches and update PR base targets.
     Push,
@@ -139,7 +142,10 @@ pub fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Commands::New { branch } => run_new(&preflight, &branch),
-        Commands::Sync { continue_sync } => run_sync(&preflight, continue_sync),
+        Commands::Sync {
+            continue_sync,
+            reset_sync,
+        } => run_sync(&preflight, continue_sync, reset_sync),
         Commands::Push => run_push(&preflight),
     }
 }
@@ -259,16 +265,29 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode {
+fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: bool) -> ExitCode {
     let original_branch = preflight.current_branch.clone();
 
-    let existing_state = match sync_state::load_sync() {
+    let mut existing_state = match sync_state::load_sync() {
         Ok(state) => state,
         Err(message) => {
             eprintln!("error: {message}");
             return ExitCode::from(1);
         }
     };
+
+    if reset_sync {
+        if existing_state.is_some() {
+            if let Err(message) = sync_state::clear() {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+            println!("Cleared previous sync state. Recomputing from scratch.");
+        } else {
+            println!("No existing sync state found. Computing sync plan from scratch.");
+        }
+        existing_state = None;
+    }
 
     let mut state = match existing_state {
         Some(state) => {
