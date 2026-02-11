@@ -375,6 +375,7 @@ fn help_lists_all_commands() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("new"))
+        .stdout(predicate::str::contains("submit"))
         .stdout(predicate::str::contains("status"))
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("push"));
@@ -402,7 +403,7 @@ fn commands_show_placeholder_when_preflight_passes() {
             "No branch-only commits in feature-x yet.",
         ))
         .stdout(predicate::str::contains(
-            "gh pr create --base feature-branch --head feature-x --title feature-x --body \"\"",
+            "stck submit --base feature-branch",
         ));
 }
 
@@ -477,8 +478,69 @@ fn new_reports_no_changes_for_new_branch_when_no_commits_exist() {
             "No branch-only commits in feature-next yet.",
         ))
         .stdout(predicate::str::contains(
-            "gh pr create --base feature-branch --head feature-next --title feature-next --body \"\"",
+            "stck submit --base feature-branch",
         ));
+}
+
+#[test]
+fn submit_creates_pr_with_base_override() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-submit-base-override.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.args(["submit", "--base", "feature-base"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base feature-base --head feature-branch --title feature-branch --body \"\"",
+        ))
+        .stdout(predicate::str::contains(
+            "Created PR for feature-branch targeting feature-base.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("submit log should exist");
+    assert!(log.contains("pr create --base feature-base --head feature-branch"));
+}
+
+#[test]
+fn submit_defaults_base_to_default_branch() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-submit-default-base.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("submit");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No --base provided. Defaulting PR base to main.",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"\"",
+        ));
+}
+
+#[test]
+fn submit_noops_when_pr_exists() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_HAS_CURRENT_PR", "1");
+    cmd.arg("submit");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Branch feature-branch already has an open PR.",
+    ));
+}
+
+#[test]
+fn submit_rejects_default_branch() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_CURRENT_BRANCH", "main");
+    cmd.arg("submit");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: cannot submit PR for default branch main; checkout a feature branch and retry",
+    ));
 }
 
 #[test]

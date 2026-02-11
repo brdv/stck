@@ -25,6 +25,12 @@ enum Commands {
         /// Name of the branch to create.
         branch: String,
     },
+    /// Create a PR for the current branch if missing.
+    Submit {
+        /// Base branch for the PR (defaults to repository default branch).
+        #[arg(long)]
+        base: Option<String>,
+    },
     /// Show detected stack and PR state.
     Status,
     /// Restack/rebase the local stack.
@@ -142,6 +148,7 @@ pub fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Commands::New { branch } => run_new(&preflight, &branch),
+        Commands::Submit { base } => run_submit(&preflight, base.as_deref()),
         Commands::Sync {
             continue_sync,
             reset_sync,
@@ -243,8 +250,8 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     };
     if !has_commits {
         println!(
-            "No branch-only commits in {} yet. Add commits, then run: gh pr create --base {} --head {} --title {} --body \"\"",
-            new_branch, pr_base_branch, new_branch, new_branch
+            "No branch-only commits in {} yet. Add commits, then run: stck submit --base {}",
+            new_branch, pr_base_branch
         );
         return ExitCode::SUCCESS;
     }
@@ -262,6 +269,64 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         "Created branch {} and opened a stacked PR targeting {}.",
         new_branch, pr_base_branch
     );
+    ExitCode::SUCCESS
+}
+
+fn run_submit(preflight: &env::PreflightContext, base_override: Option<&str>) -> ExitCode {
+    let current_branch = &preflight.current_branch;
+    if current_branch == &preflight.default_branch {
+        eprintln!(
+            "error: cannot submit PR for default branch {}; checkout a feature branch and retry",
+            preflight.default_branch
+        );
+        return ExitCode::from(1);
+    }
+
+    let has_upstream = match gitops::branch_has_upstream(current_branch) {
+        Ok(has_upstream) => has_upstream,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    if !has_upstream {
+        println!("$ git push -u origin {}", current_branch);
+        if let Err(message) = gitops::push_set_upstream(current_branch) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    let current_has_pr = match github::pr_exists_for_head(current_branch) {
+        Ok(exists) => exists,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    if current_has_pr {
+        println!("Branch {} already has an open PR.", current_branch);
+        return ExitCode::SUCCESS;
+    }
+
+    let base = base_override.unwrap_or(&preflight.default_branch);
+    if base_override.is_none() {
+        println!(
+            "No --base provided. Defaulting PR base to {}.",
+            preflight.default_branch
+        );
+    }
+
+    println!(
+        "$ gh pr create --base {} --head {} --title {} --body \"\"",
+        base, current_branch, current_branch
+    );
+    if let Err(message) = github::create_pr(base, current_branch, current_branch) {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
+    println!("Created PR for {} targeting {}.", current_branch, base);
     ExitCode::SUCCESS
 }
 
