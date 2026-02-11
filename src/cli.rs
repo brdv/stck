@@ -427,8 +427,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
         };
-        let old_base_ref = format!("refs/heads/{}", step.old_base_ref);
-        let old_base_sha = match gitops::resolve_ref(&old_base_ref) {
+        let old_base_sha = match gitops::resolve_old_base_for_rebase(&step.old_base_ref) {
             Ok(sha) => sha,
             Err(message) => {
                 eprintln!("error: {message}");

@@ -36,6 +36,22 @@ pub fn resolve_ref(reference: &str) -> Result<String, String> {
     rev_parse(reference)
 }
 
+pub fn resolve_old_base_for_rebase(base_branch: &str) -> Result<String, String> {
+    let local_ref = format!("refs/heads/{base_branch}");
+    if let Ok(sha) = rev_parse(&local_ref) {
+        return Ok(sha);
+    }
+
+    let remote_ref = format!("refs/remotes/origin/{base_branch}");
+    if let Ok(sha) = rev_parse(&remote_ref) {
+        return Ok(sha);
+    }
+
+    Err(format!(
+        "could not resolve old base branch `{base_branch}` locally or on origin; fetch and/or restore the branch, then rerun `stck sync`"
+    ))
+}
+
 pub fn git_dir() -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-dir"])
