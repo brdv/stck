@@ -16,6 +16,7 @@ Command surface:
 
 ```bash
 stck new <branch>
+stck submit [--base <branch>]
 stck status
 stck sync
 stck push

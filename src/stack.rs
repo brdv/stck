@@ -93,6 +93,21 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
     }
 }
 
+pub fn first_open_branch_rooted_on_default<'a>(
+    stack: &'a [PullRequest],
+    default_branch: &str,
+) -> Option<&'a PullRequest> {
+    let first_open = stack
+        .iter()
+        .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())?;
+
+    if first_open.base_ref_name == default_branch {
+        Some(first_open)
+    } else {
+        None
+    }
+}
+
 pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncStep> {
     build_sync_plan_with_options(stack, default_branch, false)
 }
@@ -157,7 +172,7 @@ pub fn build_push_retargets(stack: &[PullRequest], default_branch: &str) -> Vec<
 mod tests {
     use super::{
         build_push_branches, build_push_retargets, build_status_report, build_sync_plan,
-        RetargetStep, SyncStep,
+        first_open_branch_rooted_on_default, RetargetStep, SyncStep,
     };
     use crate::github::PullRequest;
 
@@ -199,6 +214,28 @@ mod tests {
         assert_eq!(report.summary.needs_sync, 1);
         assert_eq!(report.summary.base_mismatch, 0);
         assert_eq!(report.lines[1].flags, vec!["needs_sync"]);
+    }
+
+    #[test]
+    fn detects_first_open_branch_rooted_on_default() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "OPEN"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+        ];
+
+        let first = first_open_branch_rooted_on_default(&stack, "main")
+            .expect("first open branch rooted on default should exist");
+        assert_eq!(first.head_ref_name, "feature-a");
+    }
+
+    #[test]
+    fn returns_none_when_first_open_branch_not_rooted_on_default() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "MERGED"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+        ];
+
+        assert!(first_open_branch_rooted_on_default(&stack, "main").is_none());
     }
 
     #[test]

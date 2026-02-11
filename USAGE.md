@@ -13,6 +13,7 @@ This guide describes the expected `stck` workflow in a stacked PR repository.
 
 ```bash
 stck new <branch>
+stck submit [--base <branch>]
 stck status
 stck sync
 stck push
@@ -60,6 +61,20 @@ stck new feature-b
   - default branch when starting a new stack from default branch.
 
 If the new branch has no commits beyond its base, `stck` does not create an empty PR and prints an explicit follow-up `gh pr create ...` command to run after adding commits.
+
+### 2b. Submit PR for current branch
+
+```bash
+stck submit
+# or:
+stck submit --base feature-a
+```
+
+`submit` creates a PR for the current branch when one does not exist.
+
+- If no `--base` is provided, it defaults to the repository default branch.
+- Use `--base` to target a stack parent branch explicitly.
+- If the current branch already has a PR, it reports a no-op.
 
 ### 3. Sync local stack after upstream changes
 
