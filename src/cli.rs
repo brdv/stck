@@ -324,6 +324,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                 steps,
                 completed_steps: 0,
                 failed_step: None,
+                failed_step_branch_head: None,
             };
             if let Err(message) = sync_state::save_sync(&state) {
                 eprintln!("error: {message}");
@@ -347,11 +348,38 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
             return ExitCode::from(1);
         }
 
-        // Previous step failed and user resolved it manually; continue from the next step.
-        if state.completed_steps <= failed_step {
-            state.completed_steps = failed_step + 1;
+        if continue_sync {
+            let step = &state.steps[failed_step];
+            let branch_ref = format!("refs/heads/{}", step.branch);
+            let current_head = match gitops::resolve_ref(&branch_ref) {
+                Ok(sha) => sha,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+
+            let Some(failed_head) = state.failed_step_branch_head.as_deref() else {
+                eprintln!("error: sync state is missing failed-step branch head; rerun `stck sync` to retry");
+                return ExitCode::from(1);
+            };
+
+            if current_head == failed_head {
+                eprintln!("error: no completed rebase detected for {}; resolve with `git rebase --continue` (or rerun `stck sync` to retry the step)", step.branch);
+                return ExitCode::from(1);
+            }
+
+            if state.completed_steps <= failed_step {
+                state.completed_steps = failed_step + 1;
+            }
+        } else {
+            // For plain sync retries, keep legacy behavior and continue from next step.
+            if state.completed_steps <= failed_step {
+                state.completed_steps = failed_step + 1;
+            }
         }
         state.failed_step = None;
+        state.failed_step_branch_head = None;
         if let Err(message) = sync_state::save_sync(&state) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
@@ -360,6 +388,14 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
 
     for index in state.completed_steps..state.steps.len() {
         let step = &state.steps[index];
+        let branch_ref = format!("refs/heads/{}", step.branch);
+        let branch_head = match gitops::resolve_ref(&branch_ref) {
+            Ok(sha) => sha,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
         let old_base_ref = format!("refs/heads/{}", step.old_base_ref);
         let old_base_sha = match gitops::resolve_ref(&old_base_ref) {
             Ok(sha) => sha,
@@ -375,6 +411,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
         );
         if let Err(message) = gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch) {
             state.failed_step = Some(index);
+            state.failed_step_branch_head = Some(branch_head);
             if let Err(save_error) = sync_state::save_sync(&state) {
                 eprintln!("error: {save_error}");
                 return ExitCode::from(1);
@@ -385,6 +422,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
 
         state.completed_steps = index + 1;
         state.failed_step = None;
+        state.failed_step_branch_head = None;
         if let Err(message) = sync_state::save_sync(&state) {
             eprintln!("error: {message}");
             return ExitCode::from(1);

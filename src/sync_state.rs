@@ -9,6 +9,8 @@ pub struct SyncState {
     pub steps: Vec<SyncStep>,
     pub completed_steps: usize,
     pub failed_step: Option<usize>,
+    #[serde(default)]
+    pub failed_step_branch_head: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
