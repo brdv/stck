@@ -475,8 +475,7 @@ Acceptance:
 ### Release artifacts
 
 - GitHub Release per version tag `vX.Y.Z`
-- Attach prebuilt tarballs per platform/arch (at least macOS):
-  - `stck-vX.Y.Z-x86_64-apple-darwin.tar.gz`
+- Attach prebuilt tarball for Apple Silicon macOS:
   - `stck-vX.Y.Z-aarch64-apple-darwin.tar.gz`
 - Each tarball contains:
   - `stck` binary
@@ -488,9 +487,8 @@ Acceptance:
 Workflow outline:
 
 1. Trigger on version tag push: `v*`
-2. Build matrix:
+2. Build target:
    - `aarch64-apple-darwin`
-   - `x86_64-apple-darwin`
 3. Build steps:
    - `cargo build --release`
    - package into tar.gz
@@ -505,7 +503,7 @@ Two common options; pick one:
 
 - Create a tap repo: `brew tap <org>/stck`
 - Add formula `Formula/stck.rb` that:
-  - downloads the correct tarball for macOS arch
+  - downloads the Apple Silicon macOS tarball
   - installs `stck`
   - installs symlink `git-stck` → `stck`
 - Update formula URLs + sha256 on each release.
@@ -534,7 +532,7 @@ Acceptance:
 
 ### Post-release checklist
 
-- Verify install on both Apple Silicon + Intel (or via CI runner + local smoke test)
+- Verify install on Apple Silicon (or via CI runner + local smoke test)
 - Verify `git stck status` in a real repo
 - Update README install instructions (Homebrew + Git subcommand note)
 
