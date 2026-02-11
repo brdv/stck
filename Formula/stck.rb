@@ -6,7 +6,7 @@ class Stck < Formula
 
   url "https://github.com/brdv/stck/releases/download/v#{version}/stck-v#{version}-aarch64-apple-darwin.tar.gz"
   # Replace this SHA256 when publishing a new release.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "8461c4c824a619aa2f9209dad1f602fed2b4e0f05538e27a22fece249601adc7"
 
   def install
     bin.install "stck"
