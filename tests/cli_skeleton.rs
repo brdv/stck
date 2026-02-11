@@ -214,6 +214,17 @@ if [[ "${1:-}" == "checkout" && "${2:-}" == "-b" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "checkout" ]]; then
+  branch="${2:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_CHECKOUT_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -637,6 +648,9 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
             "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
         ))
         .stdout(predicate::str::contains(
+            "$ git checkout feature-branch",
+        ))
+        .stdout(predicate::str::contains(
             "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
         ));
 
@@ -647,6 +661,7 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
     assert!(log.contains(
         "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child"
     ));
+    assert!(log.contains("checkout feature-branch"));
 }
 
 #[test]
