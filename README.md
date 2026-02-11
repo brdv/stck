@@ -44,6 +44,26 @@ cargo run -- <command>
 cargo run -- status
 ```
 
+## Installation (Homebrew tap)
+
+Release automation and formula scaffolding are included for the Homebrew flow.
+
+After publishing a release, install via tap:
+
+```bash
+brew tap brdv/stck
+brew install stck
+```
+
+Both entrypoints are expected to work after install:
+
+```bash
+stck --help
+git stck --help
+```
+
+Homebrew release details are documented in [`docs/release-homebrew.md`](./docs/release-homebrew.md).
+
 ## Command Intent
 
 - `stck new <branch>`: create and stack a new branch/PR on top of the current branch.
