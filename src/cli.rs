@@ -498,6 +498,11 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
 }
 
 fn run_push(preflight: &env::PreflightContext) -> ExitCode {
+    if let Err(message) = gitops::fetch_origin() {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
     let existing_state = match sync_state::load_push() {
         Ok(state) => state,
         Err(message) => {

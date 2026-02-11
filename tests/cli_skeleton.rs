@@ -606,6 +606,17 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
 }
 
 #[test]
+fn push_shows_fetch_failure_remediation() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_FETCH_FAIL", "1");
+    cmd.arg("push");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: failed to fetch from `origin`; check remote connectivity and permissions",
+    ));
+}
+
+#[test]
 fn push_stops_before_retarget_when_a_push_fails() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = std::env::temp_dir().join("stck-push-fail.log");
