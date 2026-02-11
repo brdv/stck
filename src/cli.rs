@@ -292,13 +292,15 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
     let mut state = match existing_state {
         Some(state) => {
             if !continue_sync {
-                println!("Resuming previous sync operation from saved state.");
+                println!(
+                    "Resuming previous sync operation from saved state. Use `stck sync --reset` to discard saved state and recompute."
+                );
             }
             state
         }
         None => {
             if continue_sync {
-                eprintln!("error: no sync state found; run `stck sync` first");
+                eprintln!("error: no sync state found; run `stck sync` to compute a new plan");
                 return ExitCode::from(1);
             }
 

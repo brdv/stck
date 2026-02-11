@@ -813,7 +813,7 @@ fn sync_continue_requires_existing_state() {
     cmd.args(["sync", "--continue"]);
 
     cmd.assert().code(1).stderr(predicate::str::contains(
-        "error: no sync state found; run `stck sync` first",
+        "error: no sync state found; run `stck sync` to compute a new plan",
     ));
 }
 
