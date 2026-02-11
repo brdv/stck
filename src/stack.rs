@@ -31,6 +31,12 @@ pub struct SyncStep {
     pub new_base_ref: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetargetStep {
+    pub branch: String,
+    pub new_base_ref: String,
+}
+
 pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> StatusReport {
     let mut lines = Vec::with_capacity(stack.len());
     let mut needs_sync = 0usize;
@@ -88,18 +94,31 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
 }
 
 pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncStep> {
+    build_sync_plan_with_options(stack, default_branch, false)
+}
+
+pub fn build_sync_plan_with_options(
+    stack: &[PullRequest],
+    default_branch: &str,
+    force_rewrite_first_open: bool,
+) -> Vec<SyncStep> {
     let mut steps = Vec::new();
     let mut previous_open_branch: Option<&str> = None;
     let mut previous_open_rewritten = false;
+    let mut seen_first_open = false;
 
     for pr in stack {
         if pr.state == "MERGED" || pr.merged_at.is_some() {
             continue;
         }
 
+        let is_first_open = !seen_first_open;
+        seen_first_open = true;
+
         let target_base = previous_open_branch.unwrap_or(default_branch);
         let base_changed = pr.base_ref_name != target_base;
-        let needs_rebase = base_changed || previous_open_rewritten;
+        let forced_rewrite = is_first_open && force_rewrite_first_open;
+        let needs_rebase = base_changed || previous_open_rewritten || forced_rewrite;
 
         if needs_rebase {
             steps.push(SyncStep {
@@ -116,9 +135,30 @@ pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncS
     steps
 }
 
+pub fn build_push_branches(stack: &[PullRequest]) -> Vec<String> {
+    stack
+        .iter()
+        .filter(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+        .map(|pr| pr.head_ref_name.clone())
+        .collect()
+}
+
+pub fn build_push_retargets(stack: &[PullRequest], default_branch: &str) -> Vec<RetargetStep> {
+    build_sync_plan(stack, default_branch)
+        .into_iter()
+        .map(|step| RetargetStep {
+            branch: step.branch,
+            new_base_ref: step.new_base_ref,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_status_report, build_sync_plan, SyncStep};
+    use super::{
+        build_push_branches, build_push_retargets, build_status_report, build_sync_plan,
+        RetargetStep, SyncStep,
+    };
     use crate::github::PullRequest;
 
     fn pr(number: u64, head: &str, base: &str, state: &str) -> PullRequest {
@@ -227,6 +267,45 @@ mod tests {
                 old_base_ref: "main".to_string(),
                 new_base_ref: "feature-a".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn push_branches_include_only_open_pr_branches() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "MERGED"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(102, "feature-c", "feature-b", "OPEN"),
+        ];
+
+        let branches = build_push_branches(&stack);
+        assert_eq!(
+            branches,
+            vec!["feature-b".to_string(), "feature-c".to_string()]
+        );
+    }
+
+    #[test]
+    fn push_retargets_follow_sync_plan_targets() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "MERGED"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(102, "feature-c", "feature-b", "OPEN"),
+        ];
+
+        let retargets = build_push_retargets(&stack, "main");
+        assert_eq!(
+            retargets,
+            vec![
+                RetargetStep {
+                    branch: "feature-b".to_string(),
+                    new_base_ref: "main".to_string(),
+                },
+                RetargetStep {
+                    branch: "feature-c".to_string(),
+                    new_base_ref: "feature-b".to_string(),
+                },
+            ]
         );
     }
 }

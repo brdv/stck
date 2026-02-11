@@ -5,7 +5,7 @@ use crate::env;
 use crate::github;
 use crate::gitops;
 use crate::stack;
-use crate::sync_state::{self, SyncState};
+use crate::sync_state::{self, PushState, SyncState};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -65,6 +65,36 @@ pub fn run() -> ExitCode {
                 }
             };
             let mut report = stack::build_status_report(&stack, &preflight.default_branch);
+            if let Some(first_open) = stack
+                .iter()
+                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            {
+                if first_open.base_ref_name == preflight.default_branch {
+                    let needs_sync = match gitops::branch_needs_sync_with_default(
+                        &preflight.default_branch,
+                        &first_open.head_ref_name,
+                    ) {
+                        Ok(needs_sync) => needs_sync,
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(1);
+                        }
+                    };
+
+                    if needs_sync {
+                        if let Some(line) = report
+                            .lines
+                            .iter_mut()
+                            .find(|line| line.branch == first_open.head_ref_name)
+                        {
+                            if !line.flags.contains(&"needs_sync") {
+                                line.flags.push("needs_sync");
+                                report.summary.needs_sync += 1;
+                            }
+                        }
+                    }
+                }
+            }
             for line in &mut report.lines {
                 let needs_push = match gitops::branch_needs_push(&line.branch) {
                     Ok(needs_push) => needs_push,
@@ -112,15 +142,12 @@ pub fn run() -> ExitCode {
             ExitCode::from(1)
         }
         Commands::Sync { continue_sync } => run_sync(&preflight, continue_sync),
-        Commands::Push => {
-            eprintln!("error: `stck push` is not implemented yet");
-            ExitCode::from(1)
-        }
+        Commands::Push => run_push(&preflight),
     }
 }
 
 fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode {
-    let existing_state = match sync_state::load() {
+    let existing_state = match sync_state::load_sync() {
         Ok(state) => state,
         Err(message) => {
             eprintln!("error: {message}");
@@ -141,6 +168,11 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                 return ExitCode::from(1);
             }
 
+            if let Err(message) = gitops::fetch_origin() {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+
             let stack = match github::discover_linear_stack(
                 &preflight.current_branch,
                 &preflight.default_branch,
@@ -151,7 +183,33 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                     return ExitCode::from(1);
                 }
             };
-            let steps = stack::build_sync_plan(&stack, &preflight.default_branch);
+            let force_rewrite_first_open = if let Some(first_open) = stack
+                .iter()
+                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            {
+                if first_open.base_ref_name == preflight.default_branch {
+                    match gitops::branch_needs_sync_with_default(
+                        &preflight.default_branch,
+                        &first_open.head_ref_name,
+                    ) {
+                        Ok(needs_sync) => needs_sync,
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(1);
+                        }
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let steps = stack::build_sync_plan_with_options(
+                &stack,
+                &preflight.default_branch,
+                force_rewrite_first_open,
+            );
             if steps.is_empty() {
                 println!("Stack is already up to date. No sync needed.");
                 return ExitCode::SUCCESS;
@@ -162,7 +220,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                 completed_steps: 0,
                 failed_step: None,
             };
-            if let Err(message) = sync_state::save(&state) {
+            if let Err(message) = sync_state::save_sync(&state) {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
             }
@@ -189,7 +247,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
             state.completed_steps = failed_step + 1;
         }
         state.failed_step = None;
-        if let Err(message) = sync_state::save(&state) {
+        if let Err(message) = sync_state::save_sync(&state) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
         }
@@ -212,7 +270,7 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
         );
         if let Err(message) = gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch) {
             state.failed_step = Some(index);
-            if let Err(save_error) = sync_state::save(&state) {
+            if let Err(save_error) = sync_state::save_sync(&state) {
                 eprintln!("error: {save_error}");
                 return ExitCode::from(1);
             }
@@ -222,13 +280,13 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
 
         state.completed_steps = index + 1;
         state.failed_step = None;
-        if let Err(message) = sync_state::save(&state) {
+        if let Err(message) = sync_state::save_sync(&state) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
         }
     }
 
-    if let Err(message) = sync_state::remove() {
+    if let Err(message) = sync_state::clear() {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
@@ -237,5 +295,96 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
     } else {
         println!("Sync succeeded locally. Run `stck push` to update remotes + PR bases.");
     }
+    ExitCode::SUCCESS
+}
+
+fn run_push(preflight: &env::PreflightContext) -> ExitCode {
+    let existing_state = match sync_state::load_push() {
+        Ok(state) => state,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut state = match existing_state {
+        Some(state) => state,
+        None => {
+            let stack = match github::discover_linear_stack(
+                &preflight.current_branch,
+                &preflight.default_branch,
+            ) {
+                Ok(stack) => stack,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+
+            let state = PushState {
+                push_branches: stack::build_push_branches(&stack),
+                completed_pushes: 0,
+                retargets: stack::build_push_retargets(&stack, &preflight.default_branch),
+                completed_retargets: 0,
+            };
+            if let Err(message) = sync_state::save_push(&state) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+            state
+        }
+    };
+
+    for index in state.completed_pushes..state.push_branches.len() {
+        let branch = &state.push_branches[index];
+        println!("$ git push --force-with-lease origin {branch}");
+        if let Err(message) = gitops::push_force_with_lease(branch) {
+            if let Err(save_error) = sync_state::save_push(&state) {
+                eprintln!("error: {save_error}");
+                return ExitCode::from(1);
+            }
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+
+        state.completed_pushes = index + 1;
+        if let Err(message) = sync_state::save_push(&state) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    for index in state.completed_retargets..state.retargets.len() {
+        let retarget = &state.retargets[index];
+        println!(
+            "$ gh pr edit {} --base {}",
+            retarget.branch, retarget.new_base_ref
+        );
+        if let Err(message) = github::retarget_pr_base(&retarget.branch, &retarget.new_base_ref) {
+            if let Err(save_error) = sync_state::save_push(&state) {
+                eprintln!("error: {save_error}");
+                return ExitCode::from(1);
+            }
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+
+        state.completed_retargets = index + 1;
+        if let Err(message) = sync_state::save_push(&state) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    if let Err(message) = sync_state::clear() {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
+    println!(
+        "Push succeeded. Pushed {} branch(es) and applied {} PR base update(s).",
+        state.push_branches.len(),
+        state.retargets.len()
+    );
     ExitCode::SUCCESS
 }
