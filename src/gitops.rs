@@ -28,6 +28,25 @@ pub fn branch_needs_push(branch: &str) -> Result<bool, String> {
     Ok(local_sha != remote_sha)
 }
 
+pub fn resolve_ref(reference: &str) -> Result<String, String> {
+    rev_parse(reference)
+}
+
+pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["rebase", "--onto", new_base, old_base, branch])
+        .output()
+        .map_err(|_| "failed to run `git rebase`; ensure this is a git repository".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
+        ))
+    }
+}
+
 fn rev_parse(reference: &str) -> Result<String, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", reference])

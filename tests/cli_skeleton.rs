@@ -97,6 +97,16 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
   fi
 fi
 
+if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_REBASE_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -178,7 +188,7 @@ fn help_lists_all_commands() {
 
 #[test]
 fn commands_show_placeholder_when_preflight_passes() {
-    for command in ["new", "sync", "push"] {
+    for command in ["new", "push"] {
         let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
         if command == "new" {
             cmd.args([command, "feature-x"]);
@@ -192,6 +202,46 @@ fn commands_show_placeholder_when_preflight_passes() {
                 "error: `stck {command}` is not implemented yet"
             )));
     }
+}
+
+#[test]
+fn sync_executes_rebase_plan_and_prints_success_message() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-sync-rebase.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("sync");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto main 1111111111111111111111111111111111111111 feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
+        ))
+        .stdout(predicate::str::contains(
+            "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("rebase log should exist");
+    assert!(
+        log.contains("rebase --onto main 1111111111111111111111111111111111111111 feature-branch")
+    );
+    assert!(log.contains(
+        "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child"
+    ));
+}
+
+#[test]
+fn sync_surfaces_rebase_failure_with_guidance() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_REBASE_FAIL", "1");
+    cmd.arg("sync");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
 }
 
 #[test]

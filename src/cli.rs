@@ -107,8 +107,42 @@ pub fn run() -> ExitCode {
             ExitCode::from(1)
         }
         Commands::Sync => {
-            eprintln!("error: `stck sync` is not implemented yet");
-            ExitCode::from(1)
+            let stack = match github::discover_linear_stack(
+                &preflight.current_branch,
+                &preflight.default_branch,
+            ) {
+                Ok(stack) => stack,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+
+            let plan = stack::build_sync_plan(&stack, &preflight.default_branch);
+            for step in plan {
+                let old_base_ref = format!("refs/heads/{}", step.old_base_ref);
+                let old_base_sha = match gitops::resolve_ref(&old_base_ref) {
+                    Ok(sha) => sha,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
+
+                println!(
+                    "$ git rebase --onto {} {} {}",
+                    step.new_base_ref, old_base_sha, step.branch
+                );
+                if let Err(message) =
+                    gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch)
+                {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            }
+
+            println!("Sync succeeded locally. Run `stck push` to update remotes + PR bases.");
+            ExitCode::SUCCESS
         }
         Commands::Push => {
             eprintln!("error: `stck push` is not implemented yet");
