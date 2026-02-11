@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use crate::env;
 use crate::github;
+use crate::gitops;
 use crate::stack;
 
 #[derive(Debug, Parser)]
@@ -43,6 +44,11 @@ pub fn run() -> ExitCode {
 
     match cli.command {
         Commands::Status => {
+            if let Err(message) = gitops::fetch_origin() {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+
             let stack = match github::discover_linear_stack(
                 &preflight.current_branch,
                 &preflight.default_branch,
@@ -53,13 +59,28 @@ pub fn run() -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
-            let report = stack::build_status_report(&stack, &preflight.default_branch);
+            let mut report = stack::build_status_report(&stack, &preflight.default_branch);
+            for line in &mut report.lines {
+                let needs_push = match gitops::branch_needs_push(&line.branch) {
+                    Ok(needs_push) => needs_push,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
+
+                if needs_push {
+                    line.flags.push("needs_push");
+                    report.summary.needs_push += 1;
+                }
+            }
 
             let branch_chain = stack
                 .iter()
                 .map(|pr| pr.head_ref_name.as_str())
                 .collect::<Vec<_>>()
                 .join(" <- ");
+
             println!("Stack: {} <- {}", preflight.default_branch, branch_chain);
 
             for line in report.lines {
@@ -73,6 +94,7 @@ pub fn run() -> ExitCode {
                     line.branch, line.number, line.state, line.base, line.head, flags
                 );
             }
+
             println!(
                 "Summary: needs_sync={} needs_push={} base_mismatch={}",
                 report.summary.needs_sync, report.summary.needs_push, report.summary.base_mismatch

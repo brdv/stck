@@ -57,6 +57,46 @@ if [[ "${1:-}" == "status" && "${2:-}" == "--porcelain" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "fetch" && "${2:-}" == "origin" ]]; then
+  if [[ "${STCK_TEST_FETCH_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
+  ref="${3:-}"
+
+  if [[ "${ref}" == refs/heads/* ]]; then
+    branch="${ref#refs/heads/}"
+    case "${branch}" in
+      feature-base) echo "1111111111111111111111111111111111111111" ;;
+      feature-branch) echo "2222222222222222222222222222222222222222" ;;
+      feature-child) echo "3333333333333333333333333333333333333333" ;;
+      *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
+    esac
+    exit 0
+  fi
+
+  if [[ "${ref}" == refs/remotes/origin/* ]]; then
+    branch="${ref#refs/remotes/origin/}"
+    if [[ "${STCK_TEST_MISSING_REMOTE_BRANCH:-}" == "${branch}" ]]; then
+      exit 1
+    fi
+    if [[ "${STCK_TEST_NEEDS_PUSH_BRANCH:-}" == "${branch}" ]]; then
+      echo "ffffffffffffffffffffffffffffffffffffffff"
+      exit 0
+    fi
+    case "${branch}" in
+      feature-base) echo "1111111111111111111111111111111111111111" ;;
+      feature-branch) echo "2222222222222222222222222222222222222222" ;;
+      feature-child) echo "3333333333333333333333333333333333333333" ;;
+      *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
+    esac
+    exit 0
+  fi
+fi
+
 exit 0
 "#,
     );
@@ -241,5 +281,32 @@ fn status_fails_on_non_linear_stack() {
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: non-linear stack detected at feature-branch; child candidates: feature-child-a, feature-child-b",
+    ));
+}
+
+#[test]
+fn status_reports_needs_push_when_branch_diverges_from_origin() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_NEEDS_PUSH_BRANCH", "feature-child");
+    cmd.arg("status");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "feature-child PR #102 [OPEN] base=feature-branch head=feature-child flags=needs_push",
+        ))
+        .stdout(predicate::str::contains(
+            "Summary: needs_sync=1 needs_push=1 base_mismatch=0",
+        ));
+}
+
+#[test]
+fn status_shows_fetch_failure_remediation() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_FETCH_FAIL", "1");
+    cmd.arg("status");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: failed to fetch from `origin`; check remote connectivity and permissions",
     ));
 }
