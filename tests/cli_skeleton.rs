@@ -73,6 +73,9 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
 
   if [[ "${ref}" == refs/heads/* ]]; then
     branch="${ref#refs/heads/}"
+    if [[ "${STCK_TEST_MISSING_LOCAL_BRANCH_REF:-}" == "${branch}" ]]; then
+      exit 1
+    fi
     case "${branch}" in
       feature-base) echo "1111111111111111111111111111111111111111" ;;
       feature-branch)
@@ -98,7 +101,13 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
       exit 0
     fi
     case "${branch}" in
-      feature-base) echo "1111111111111111111111111111111111111111" ;;
+      feature-base)
+        if [[ -n "${STCK_TEST_REMOTE_FEATURE_BASE_SHA:-}" ]]; then
+          echo "${STCK_TEST_REMOTE_FEATURE_BASE_SHA}"
+        else
+          echo "1111111111111111111111111111111111111111"
+        fi
+        ;;
       feature-branch) echo "2222222222222222222222222222222222222222" ;;
       feature-child) echo "3333333333333333333333333333333333333333" ;;
       *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
@@ -748,6 +757,21 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
         "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child"
     ));
     assert!(log.contains("checkout feature-branch"));
+}
+
+#[test]
+fn sync_uses_remote_old_base_when_local_old_base_is_missing() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_MISSING_LOCAL_BRANCH_REF", "feature-base");
+    cmd.env(
+        "STCK_TEST_REMOTE_FEATURE_BASE_SHA",
+        "9999999999999999999999999999999999999999",
+    );
+    cmd.arg("sync");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "$ git rebase --onto main 9999999999999999999999999999999999999999 feature-branch",
+    ));
 }
 
 #[test]
