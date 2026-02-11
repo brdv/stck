@@ -75,32 +75,29 @@ pub fn run() -> ExitCode {
                 }
             };
             let mut report = stack::build_status_report(&stack, &preflight.default_branch);
-            if let Some(first_open) = stack
-                .iter()
-                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            if let Some(first_open) =
+                stack::first_open_branch_rooted_on_default(&stack, &preflight.default_branch)
             {
-                if first_open.base_ref_name == preflight.default_branch {
-                    let needs_sync = match gitops::branch_needs_sync_with_default(
-                        &preflight.default_branch,
-                        &first_open.head_ref_name,
-                    ) {
-                        Ok(needs_sync) => needs_sync,
-                        Err(message) => {
-                            eprintln!("error: {message}");
-                            return ExitCode::from(1);
-                        }
-                    };
+                let needs_sync = match gitops::branch_needs_sync_with_default(
+                    &preflight.default_branch,
+                    &first_open.head_ref_name,
+                ) {
+                    Ok(needs_sync) => needs_sync,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
 
-                    if needs_sync {
-                        if let Some(line) = report
-                            .lines
-                            .iter_mut()
-                            .find(|line| line.branch == first_open.head_ref_name)
-                        {
-                            if !line.flags.contains(&"needs_sync") {
-                                line.flags.push("needs_sync");
-                                report.summary.needs_sync += 1;
-                            }
+                if needs_sync {
+                    if let Some(line) = report
+                        .lines
+                        .iter_mut()
+                        .find(|line| line.branch == first_open.head_ref_name)
+                    {
+                        if !line.flags.contains(&"needs_sync") {
+                            line.flags.push("needs_sync");
+                            report.summary.needs_sync += 1;
                         }
                     }
                 }
@@ -384,23 +381,18 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                     return ExitCode::from(1);
                 }
             };
-            let force_rewrite_first_open = if let Some(first_open) = stack
-                .iter()
-                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            let force_rewrite_first_open = if let Some(first_open) =
+                stack::first_open_branch_rooted_on_default(&stack, &preflight.default_branch)
             {
-                if first_open.base_ref_name == preflight.default_branch {
-                    match gitops::branch_needs_sync_with_default(
-                        &preflight.default_branch,
-                        &first_open.head_ref_name,
-                    ) {
-                        Ok(needs_sync) => needs_sync,
-                        Err(message) => {
-                            eprintln!("error: {message}");
-                            return ExitCode::from(1);
-                        }
+                match gitops::branch_needs_sync_with_default(
+                    &preflight.default_branch,
+                    &first_open.head_ref_name,
+                ) {
+                    Ok(needs_sync) => needs_sync,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
                     }
-                } else {
-                    false
                 }
             } else {
                 false

@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
 
+const PR_LIST_LIMIT: usize = 1000;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
@@ -93,7 +95,7 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
             "--state",
             "all",
             "--limit",
-            "500",
+            "1000",
             "--json",
             "number,headRefName,baseRefName,state,mergedAt",
         ])
@@ -107,12 +109,22 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
         ));
     }
 
-    parse_pull_requests_json(&output.stdout)
+    let prs = parse_pull_requests_json(&output.stdout)?;
+    enforce_pr_list_limit(prs)
 }
 
 fn parse_pull_requests_json(bytes: &[u8]) -> Result<Vec<PullRequest>, String> {
     serde_json::from_slice::<Vec<PullRequest>>(bytes)
         .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())
+}
+
+fn enforce_pr_list_limit(prs: Vec<PullRequest>) -> Result<Vec<PullRequest>, String> {
+    if prs.len() == PR_LIST_LIMIT {
+        return Err(format!(
+            "pull request discovery hit limit ({PR_LIST_LIMIT}); rerun after reducing PR scope or extend pagination support"
+        ));
+    }
+    Ok(prs)
 }
 
 fn with_stderr(base: &str, stderr: &[u8]) -> String {
@@ -212,7 +224,7 @@ pub fn build_linear_stack(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_linear_stack, PullRequest};
+    use super::{build_linear_stack, enforce_pr_list_limit, PullRequest, PR_LIST_LIMIT};
 
     fn pr(number: u64, head: &str, base: &str) -> PullRequest {
         PullRequest {
@@ -367,5 +379,24 @@ mod tests {
 
         let parsed = serde_json::from_str::<Vec<PullRequest>>(raw);
         assert!(parsed.is_err(), "malformed list JSON should fail parse");
+    }
+
+    #[test]
+    fn errors_when_pull_request_list_hits_limit() {
+        let prs = (0..PR_LIST_LIMIT)
+            .map(|i| PullRequest {
+                number: i as u64,
+                head_ref_name: format!("feature-{i}"),
+                base_ref_name: "main".to_string(),
+                state: "OPEN".to_string(),
+                merged_at: None,
+            })
+            .collect::<Vec<_>>();
+
+        let error = enforce_pr_list_limit(prs).expect_err("limit should trigger error");
+        assert_eq!(
+            error,
+            "pull request discovery hit limit (1000); rerun after reducing PR scope or extend pagination support"
+        );
     }
 }
