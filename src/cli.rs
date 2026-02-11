@@ -5,7 +5,7 @@ use crate::env;
 use crate::github;
 use crate::gitops;
 use crate::stack;
-use crate::sync_state::{self, PushState, SyncState};
+use crate::sync_state::{self, LastSyncPlan, PushState, SyncState};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -441,6 +441,22 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
         return ExitCode::from(1);
     }
 
+    let last_plan = LastSyncPlan {
+        default_branch: preflight.default_branch.clone(),
+        retargets: state
+            .steps
+            .iter()
+            .map(|step| stack::RetargetStep {
+                branch: step.branch.clone(),
+                new_base_ref: step.new_base_ref.clone(),
+            })
+            .collect(),
+    };
+    if let Err(message) = sync_state::save_last_sync_plan(&last_plan) {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+
     if let Err(message) = sync_state::clear() {
         eprintln!("error: {message}");
         return ExitCode::from(1);
@@ -475,11 +491,27 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
+            let cached_plan = match sync_state::load_last_sync_plan() {
+                Ok(plan) => plan,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+            let retargets = if let Some(plan) = cached_plan {
+                if plan.default_branch == preflight.default_branch {
+                    plan.retargets
+                } else {
+                    stack::build_push_retargets(&stack, &preflight.default_branch)
+                }
+            } else {
+                stack::build_push_retargets(&stack, &preflight.default_branch)
+            };
 
             let state = PushState {
                 push_branches: stack::build_push_branches(&stack),
                 completed_pushes: 0,
-                retargets: stack::build_push_retargets(&stack, &preflight.default_branch),
+                retargets,
                 completed_retargets: 0,
             };
             if let Err(message) = sync_state::save_push(&state) {
@@ -532,6 +564,10 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
     }
 
     if let Err(message) = sync_state::clear() {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+    if let Err(message) = sync_state::clear_last_sync_plan() {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
