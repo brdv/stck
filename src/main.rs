@@ -3,6 +3,7 @@ mod env;
 mod github;
 mod gitops;
 mod stack;
+mod sync_state;
 
 use std::process::ExitCode;
 

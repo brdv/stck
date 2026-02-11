@@ -1,4 +1,5 @@
 use crate::github::PullRequest;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusLine {
@@ -21,6 +22,13 @@ pub struct StatusSummary {
 pub struct StatusReport {
     pub lines: Vec<StatusLine>,
     pub summary: StatusSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncStep {
+    pub branch: String,
+    pub old_base_ref: String,
+    pub new_base_ref: String,
 }
 
 pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> StatusReport {
@@ -79,9 +87,38 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
     }
 }
 
+pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncStep> {
+    let mut steps = Vec::new();
+    let mut previous_open_branch: Option<&str> = None;
+    let mut previous_open_rewritten = false;
+
+    for pr in stack {
+        if pr.state == "MERGED" || pr.merged_at.is_some() {
+            continue;
+        }
+
+        let target_base = previous_open_branch.unwrap_or(default_branch);
+        let base_changed = pr.base_ref_name != target_base;
+        let needs_rebase = base_changed || previous_open_rewritten;
+
+        if needs_rebase {
+            steps.push(SyncStep {
+                branch: pr.head_ref_name.clone(),
+                old_base_ref: pr.base_ref_name.clone(),
+                new_base_ref: target_base.to_string(),
+            });
+        }
+
+        previous_open_branch = Some(pr.head_ref_name.as_str());
+        previous_open_rewritten = needs_rebase;
+    }
+
+    steps
+}
+
 #[cfg(test)]
 mod tests {
-    use super::build_status_report;
+    use super::{build_status_report, build_sync_plan, SyncStep};
     use crate::github::PullRequest;
 
     fn pr(number: u64, head: &str, base: &str, state: &str) -> PullRequest {
@@ -136,5 +173,60 @@ mod tests {
         assert_eq!(report.summary.needs_sync, 1);
         assert_eq!(report.summary.base_mismatch, 1);
         assert_eq!(report.lines[1].flags, vec!["base_mismatch", "needs_sync"]);
+    }
+
+    #[test]
+    fn sync_plan_is_empty_when_open_stack_is_aligned() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "OPEN"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+        ];
+
+        let plan = build_sync_plan(&stack, "main");
+        assert!(plan.is_empty());
+    }
+
+    #[test]
+    fn sync_plan_restacks_child_of_merged_parent_and_descendants() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "MERGED"),
+            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(102, "feature-c", "feature-b", "OPEN"),
+        ];
+
+        let plan = build_sync_plan(&stack, "main");
+        assert_eq!(
+            plan,
+            vec![
+                SyncStep {
+                    branch: "feature-b".to_string(),
+                    old_base_ref: "feature-a".to_string(),
+                    new_base_ref: "main".to_string(),
+                },
+                SyncStep {
+                    branch: "feature-c".to_string(),
+                    old_base_ref: "feature-b".to_string(),
+                    new_base_ref: "feature-b".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn sync_plan_restacks_on_base_mismatch() {
+        let stack = vec![
+            pr(100, "feature-a", "main", "OPEN"),
+            pr(101, "feature-b", "main", "OPEN"),
+        ];
+
+        let plan = build_sync_plan(&stack, "main");
+        assert_eq!(
+            plan,
+            vec![SyncStep {
+                branch: "feature-b".to_string(),
+                old_base_ref: "main".to_string(),
+                new_base_ref: "feature-a".to_string(),
+            }]
+        );
     }
 }

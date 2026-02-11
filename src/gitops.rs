@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::{env, path::PathBuf};
 
 pub fn fetch_origin() -> Result<(), String> {
     let output = Command::new("git")
@@ -26,6 +27,54 @@ pub fn branch_needs_push(branch: &str) -> Result<bool, String> {
     };
 
     Ok(local_sha != remote_sha)
+}
+
+pub fn resolve_ref(reference: &str) -> Result<String, String> {
+    rev_parse(reference)
+}
+
+pub fn git_dir() -> Result<PathBuf, String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .output()
+        .map_err(|_| "failed to run `git rev-parse --git-dir`".to_string())?;
+
+    if !output.status.success() {
+        return Err("could not determine git directory".to_string());
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw.is_empty() {
+        return Err("git directory path is empty".to_string());
+    }
+
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        let cwd = env::current_dir().map_err(|_| "failed to read current directory".to_string())?;
+        Ok(cwd.join(path))
+    }
+}
+
+pub fn rebase_in_progress() -> Result<bool, String> {
+    let git_dir = git_dir()?;
+    Ok(git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists())
+}
+
+pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["rebase", "--onto", new_base, old_base, branch])
+        .output()
+        .map_err(|_| "failed to run `git rebase`; ensure this is a git repository".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
+        ))
+    }
 }
 
 fn rev_parse(reference: &str) -> Result<String, String> {

@@ -5,6 +5,7 @@ use crate::env;
 use crate::github;
 use crate::gitops;
 use crate::stack;
+use crate::sync_state::{self, SyncState};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -26,7 +27,11 @@ enum Commands {
     /// Show detected stack and PR state.
     Status,
     /// Restack/rebase the local stack.
-    Sync,
+    Sync {
+        /// Continue a previously interrupted sync run.
+        #[arg(long = "continue")]
+        continue_sync: bool,
+    },
     /// Push rewritten branches and update PR base targets.
     Push,
 }
@@ -106,13 +111,131 @@ pub fn run() -> ExitCode {
             eprintln!("error: `stck new` is not implemented yet");
             ExitCode::from(1)
         }
-        Commands::Sync => {
-            eprintln!("error: `stck sync` is not implemented yet");
-            ExitCode::from(1)
-        }
+        Commands::Sync { continue_sync } => run_sync(&preflight, continue_sync),
         Commands::Push => {
             eprintln!("error: `stck push` is not implemented yet");
             ExitCode::from(1)
         }
     }
+}
+
+fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode {
+    let existing_state = match sync_state::load() {
+        Ok(state) => state,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut state = match existing_state {
+        Some(state) => {
+            if !continue_sync {
+                println!("Resuming previous sync operation from saved state.");
+            }
+            state
+        }
+        None => {
+            if continue_sync {
+                eprintln!("error: no sync state found; run `stck sync` first");
+                return ExitCode::from(1);
+            }
+
+            let stack = match github::discover_linear_stack(
+                &preflight.current_branch,
+                &preflight.default_branch,
+            ) {
+                Ok(stack) => stack,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+            let steps = stack::build_sync_plan(&stack, &preflight.default_branch);
+            if steps.is_empty() {
+                println!("Stack is already up to date. No sync needed.");
+                return ExitCode::SUCCESS;
+            }
+
+            let state = SyncState {
+                steps,
+                completed_steps: 0,
+                failed_step: None,
+            };
+            if let Err(message) = sync_state::save(&state) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+            state
+        }
+    };
+
+    if let Some(failed_step) = state.failed_step {
+        let rebase_in_progress = match gitops::rebase_in_progress() {
+            Ok(in_progress) => in_progress,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+
+        if rebase_in_progress {
+            eprintln!("error: rebase is still in progress; run `git rebase --continue` (or `git rebase --abort`) before rerunning `stck sync`");
+            return ExitCode::from(1);
+        }
+
+        // Previous step failed and user resolved it manually; continue from the next step.
+        if state.completed_steps <= failed_step {
+            state.completed_steps = failed_step + 1;
+        }
+        state.failed_step = None;
+        if let Err(message) = sync_state::save(&state) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    for index in state.completed_steps..state.steps.len() {
+        let step = &state.steps[index];
+        let old_base_ref = format!("refs/heads/{}", step.old_base_ref);
+        let old_base_sha = match gitops::resolve_ref(&old_base_ref) {
+            Ok(sha) => sha,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+
+        println!(
+            "$ git rebase --onto {} {} {}",
+            step.new_base_ref, old_base_sha, step.branch
+        );
+        if let Err(message) = gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch) {
+            state.failed_step = Some(index);
+            if let Err(save_error) = sync_state::save(&state) {
+                eprintln!("error: {save_error}");
+                return ExitCode::from(1);
+            }
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+
+        state.completed_steps = index + 1;
+        state.failed_step = None;
+        if let Err(message) = sync_state::save(&state) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
+
+    if let Err(message) = sync_state::remove() {
+        eprintln!("error: {message}");
+        return ExitCode::from(1);
+    }
+    if state.steps.is_empty() {
+        println!("Stack is already up to date. No sync needed.");
+    } else {
+        println!("Sync succeeded locally. Run `stck push` to update remotes + PR bases.");
+    }
+    ExitCode::SUCCESS
 }
