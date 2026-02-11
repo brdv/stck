@@ -71,7 +71,13 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
     branch="${ref#refs/heads/}"
     case "${branch}" in
       feature-base) echo "1111111111111111111111111111111111111111" ;;
-      feature-branch) echo "2222222222222222222222222222222222222222" ;;
+      feature-branch)
+        if [[ -n "${STCK_TEST_FEATURE_BRANCH_HEAD:-}" ]]; then
+          echo "${STCK_TEST_FEATURE_BRANCH_HEAD}"
+        else
+          echo "2222222222222222222222222222222222222222"
+        fi
+        ;;
       feature-child) echo "3333333333333333333333333333333333333333" ;;
       *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     esac
@@ -742,13 +748,17 @@ fn sync_continue_resumes_after_previous_failure() {
     resume.env("PATH", full_path);
     resume.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
     resume.env("STCK_TEST_LOG", log_path.as_os_str());
+    resume.env(
+        "STCK_TEST_FEATURE_BRANCH_HEAD",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
     resume.args(["sync", "--continue"]);
 
     resume
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
+            "$ git rebase --onto feature-branch bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb feature-child",
         ))
         .stdout(predicate::str::contains(
             "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
@@ -757,13 +767,39 @@ fn sync_continue_resumes_after_previous_failure() {
     let log = fs::read_to_string(&log_path).expect("rebase log should exist");
     let first_step = "rebase --onto main 1111111111111111111111111111111111111111 feature-branch";
     let second_step =
-        "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child";
+        "rebase --onto feature-branch bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb feature-child";
     assert_eq!(log.matches(first_step).count(), 1);
     assert_eq!(log.matches(second_step).count(), 1);
     assert!(
         !state_path.exists(),
         "sync state should be removed after success"
     );
+}
+
+#[test]
+fn sync_continue_fails_when_rebase_was_aborted() {
+    let (temp, mut first) = stck_cmd_with_stubbed_tools();
+    let fail_once_path = temp.path().join("fail-once.marker");
+
+    first.env(
+        "STCK_TEST_REBASE_FAIL_ONCE_FILE",
+        fail_once_path.as_os_str(),
+    );
+    first.arg("sync");
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
+
+    let mut resume = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    resume.env("PATH", full_path);
+    resume.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    resume.args(["sync", "--continue"]);
+
+    resume.assert().code(1).stderr(predicate::str::contains(
+        "error: no completed rebase detected for feature-branch; resolve with `git rebase --continue` (or rerun `stck sync` to retry the step)",
+    ));
 }
 
 #[test]
