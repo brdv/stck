@@ -37,6 +37,36 @@ pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
     }
 }
 
+pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
+    let output = Command::new("gh")
+        .args(["pr", "view", branch, "--json", "number"])
+        .output()
+        .map_err(|_| "failed to run `gh pr view`; ensure GitHub CLI is installed".to_string())?;
+
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(_) => Ok(false),
+        None => Err("failed to determine PR presence for branch".to_string()),
+    }
+}
+
+pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
+    let output = Command::new("gh")
+        .args([
+            "pr", "create", "--base", base, "--head", head, "--title", title, "--body", "",
+        ])
+        .output()
+        .map_err(|_| "failed to run `gh pr create`; ensure GitHub CLI is installed".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to create PR for branch {head}; fix the GitHub error and retry"
+        ))
+    }
+}
+
 fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([
