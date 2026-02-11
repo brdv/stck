@@ -659,7 +659,7 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
             "$ gh pr edit feature-child --base feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s).",
+            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s) in this run.",
         ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
@@ -757,7 +757,7 @@ fn push_resumes_after_partial_retarget_failure() {
             "$ gh pr edit feature-child --base feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s).",
+            "Push succeeded. Pushed 0 branch(es) and applied 1 PR base update(s) in this run.",
         ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
@@ -836,7 +836,7 @@ fn push_skips_branches_without_local_changes() {
     cmd.arg("push");
 
     cmd.assert().success().stdout(predicate::str::contains(
-        "Push succeeded. Pushed 0 branch(es) and applied 2 PR base update(s).",
+        "Push succeeded. Pushed 0 branch(es) and applied 2 PR base update(s) in this run.",
     ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
