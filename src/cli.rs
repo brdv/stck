@@ -146,6 +146,12 @@ pub fn run() -> ExitCode {
 
 fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     let current_branch = &preflight.current_branch;
+    let starting_from_default = current_branch == &preflight.default_branch;
+    let pr_base_branch = if starting_from_default {
+        preflight.default_branch.as_str()
+    } else {
+        current_branch.as_str()
+    };
 
     let local_exists = match gitops::local_branch_exists(new_branch) {
         Ok(exists) => exists,
@@ -171,40 +177,42 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let has_upstream = match gitops::branch_has_upstream(current_branch) {
-        Ok(has_upstream) => has_upstream,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(1);
-        }
-    };
+    if !starting_from_default {
+        let has_upstream = match gitops::branch_has_upstream(current_branch) {
+            Ok(has_upstream) => has_upstream,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
 
-    if !has_upstream {
-        println!("$ git push -u origin {}", current_branch);
-        if let Err(message) = gitops::push_set_upstream(current_branch) {
-            eprintln!("error: {message}");
-            return ExitCode::from(1);
+        if !has_upstream {
+            println!("$ git push -u origin {}", current_branch);
+            if let Err(message) = gitops::push_set_upstream(current_branch) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
         }
-    }
 
-    let current_has_pr = match github::pr_exists_for_head(current_branch) {
-        Ok(exists) => exists,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(1);
-        }
-    };
+        let current_has_pr = match github::pr_exists_for_head(current_branch) {
+            Ok(exists) => exists,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
 
-    if !current_has_pr {
-        println!(
-            "$ gh pr create --base {} --head {} --title {} --body \"\"",
-            preflight.default_branch, current_branch, current_branch
-        );
-        if let Err(message) =
-            github::create_pr(&preflight.default_branch, current_branch, current_branch)
-        {
-            eprintln!("error: {message}");
-            return ExitCode::from(1);
+        if !current_has_pr {
+            println!(
+                "$ gh pr create --base {} --head {} --title {} --body \"\"",
+                preflight.default_branch, current_branch, current_branch
+            );
+            if let Err(message) =
+                github::create_pr(&preflight.default_branch, current_branch, current_branch)
+            {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
         }
     }
 
@@ -229,24 +237,24 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     };
     if !has_commits {
         println!(
-            "No changes in new stack item. Create PR for {} after adding commits.",
-            new_branch
+            "No branch-only commits in {} yet. Add commits, then run: gh pr create --base {} --head {} --title {} --body \"\"",
+            new_branch, pr_base_branch, new_branch, new_branch
         );
         return ExitCode::SUCCESS;
     }
 
     println!(
         "$ gh pr create --base {} --head {} --title {} --body \"\"",
-        current_branch, new_branch, new_branch
+        pr_base_branch, new_branch, new_branch
     );
-    if let Err(message) = github::create_pr(current_branch, new_branch, new_branch) {
+    if let Err(message) = github::create_pr(pr_base_branch, new_branch, new_branch) {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
 
     println!(
         "Created branch {} and opened a stacked PR targeting {}.",
-        new_branch, current_branch
+        new_branch, pr_base_branch
     );
     ExitCode::SUCCESS
 }

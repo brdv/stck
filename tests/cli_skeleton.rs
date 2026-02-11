@@ -46,7 +46,11 @@ if [[ "${1:-}" == "symbolic-ref" && "${2:-}" == "--quiet" && "${3:-}" == "--shor
   if [[ "${STCK_TEST_DETACHED_HEAD:-0}" == "1" ]]; then
     exit 1
   fi
-  echo "feature-branch"
+  if [[ -n "${STCK_TEST_CURRENT_BRANCH:-}" ]]; then
+    echo "${STCK_TEST_CURRENT_BRANCH}"
+  else
+    echo "feature-branch"
+  fi
   exit 0
 fi
 
@@ -142,7 +146,7 @@ fi
 
 if [[ "${1:-}" == "rev-list" && "${2:-}" == "--count" ]]; then
   range="${3:-}"
-  if [[ "${range}" == "refs/heads/feature-branch..refs/heads/feature-next" || "${range}" == "refs/heads/feature-branch..refs/heads/feature-x" ]]; then
+  if [[ "${range}" == *"..refs/heads/feature-next" || "${range}" == *"..refs/heads/feature-x" ]]; then
     if [[ "${STCK_TEST_NEW_BRANCH_HAS_COMMITS:-0}" == "1" ]]; then
       echo "1"
     else
@@ -379,9 +383,14 @@ fn commands_show_placeholder_when_preflight_passes() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.args([command, "feature-x"]);
 
-    cmd.assert().success().stdout(predicate::str::contains(
-        "No changes in new stack item. Create PR for feature-x after adding commits.",
-    ));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No branch-only commits in feature-x yet.",
+        ))
+        .stdout(predicate::str::contains(
+            "gh pr create --base feature-branch --head feature-x --title feature-x --body \"\"",
+        ));
 }
 
 #[test]
@@ -449,9 +458,42 @@ fn new_reports_no_changes_for_new_branch_when_no_commits_exist() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.args(["new", "feature-next"]);
 
-    cmd.assert().success().stdout(predicate::str::contains(
-        "No changes in new stack item. Create PR for feature-next after adding commits.",
-    ));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No branch-only commits in feature-next yet.",
+        ))
+        .stdout(predicate::str::contains(
+            "gh pr create --base feature-branch --head feature-next --title feature-next --body \"\"",
+        ));
+}
+
+#[test]
+fn new_from_default_branch_skips_default_branch_bootstrap() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-new-from-default.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_CURRENT_BRANCH", "main");
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("$ git checkout -b feature-next"))
+        .stdout(predicate::str::contains(
+            "$ git push -u origin feature-next",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base main --head feature-next --title feature-next --body \"\"",
+        ))
+        .stdout(predicate::str::contains(
+            "Created branch feature-next and opened a stacked PR targeting main.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("new log should exist");
+    assert!(!log.contains("push -u origin main"));
+    assert!(!log.contains("pr create --base main --head main"));
 }
 
 #[test]
