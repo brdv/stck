@@ -106,6 +106,15 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--git-dir" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
+  ancestor="${3:-}"
+  descendant="${4:-}"
+  if [[ "${STCK_TEST_DEFAULT_ADVANCED:-0}" == "1" && "${ancestor}" == "refs/remotes/origin/main" && "${descendant}" == "refs/heads/feature-base" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
@@ -416,6 +425,29 @@ fn sync_reports_noop_when_stack_is_already_up_to_date() {
 }
 
 #[test]
+fn sync_rebases_when_default_branch_has_advanced() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-sync-default-advanced.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_SYNC_NOOP", "1");
+    cmd.env("STCK_TEST_DEFAULT_ADVANCED", "1");
+    cmd.arg("sync");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature-base",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto feature-base 1111111111111111111111111111111111111111 feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
+        ));
+}
+
+#[test]
 fn sync_continue_requires_existing_state() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.args(["sync", "--continue"]);
@@ -584,6 +616,23 @@ fn status_reports_needs_push_when_branch_diverges_from_origin() {
         ))
         .stdout(predicate::str::contains(
             "Summary: needs_sync=1 needs_push=1 base_mismatch=0",
+        ));
+}
+
+#[test]
+fn status_reports_needs_sync_when_default_branch_has_advanced() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_SYNC_NOOP", "1");
+    cmd.env("STCK_TEST_DEFAULT_ADVANCED", "1");
+    cmd.arg("status");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "feature-base PR #100 [OPEN] base=main head=feature-base flags=needs_sync",
+        ))
+        .stdout(predicate::str::contains(
+            "Summary: needs_sync=1 needs_push=0 base_mismatch=0",
         ));
 }
 

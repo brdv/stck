@@ -94,18 +94,31 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
 }
 
 pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncStep> {
+    build_sync_plan_with_options(stack, default_branch, false)
+}
+
+pub fn build_sync_plan_with_options(
+    stack: &[PullRequest],
+    default_branch: &str,
+    force_rewrite_first_open: bool,
+) -> Vec<SyncStep> {
     let mut steps = Vec::new();
     let mut previous_open_branch: Option<&str> = None;
     let mut previous_open_rewritten = false;
+    let mut seen_first_open = false;
 
     for pr in stack {
         if pr.state == "MERGED" || pr.merged_at.is_some() {
             continue;
         }
 
+        let is_first_open = !seen_first_open;
+        seen_first_open = true;
+
         let target_base = previous_open_branch.unwrap_or(default_branch);
         let base_changed = pr.base_ref_name != target_base;
-        let needs_rebase = base_changed || previous_open_rewritten;
+        let forced_rewrite = is_first_open && force_rewrite_first_open;
+        let needs_rebase = base_changed || previous_open_rewritten || forced_rewrite;
 
         if needs_rebase {
             steps.push(SyncStep {

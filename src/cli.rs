@@ -65,6 +65,36 @@ pub fn run() -> ExitCode {
                 }
             };
             let mut report = stack::build_status_report(&stack, &preflight.default_branch);
+            if let Some(first_open) = stack
+                .iter()
+                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            {
+                if first_open.base_ref_name == preflight.default_branch {
+                    let needs_sync = match gitops::branch_needs_sync_with_default(
+                        &preflight.default_branch,
+                        &first_open.head_ref_name,
+                    ) {
+                        Ok(needs_sync) => needs_sync,
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(1);
+                        }
+                    };
+
+                    if needs_sync {
+                        if let Some(line) = report
+                            .lines
+                            .iter_mut()
+                            .find(|line| line.branch == first_open.head_ref_name)
+                        {
+                            if !line.flags.contains(&"needs_sync") {
+                                line.flags.push("needs_sync");
+                                report.summary.needs_sync += 1;
+                            }
+                        }
+                    }
+                }
+            }
             for line in &mut report.lines {
                 let needs_push = match gitops::branch_needs_push(&line.branch) {
                     Ok(needs_push) => needs_push,
@@ -138,6 +168,11 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                 return ExitCode::from(1);
             }
 
+            if let Err(message) = gitops::fetch_origin() {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+
             let stack = match github::discover_linear_stack(
                 &preflight.current_branch,
                 &preflight.default_branch,
@@ -148,7 +183,33 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool) -> ExitCode 
                     return ExitCode::from(1);
                 }
             };
-            let steps = stack::build_sync_plan(&stack, &preflight.default_branch);
+            let force_rewrite_first_open = if let Some(first_open) = stack
+                .iter()
+                .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+            {
+                if first_open.base_ref_name == preflight.default_branch {
+                    match gitops::branch_needs_sync_with_default(
+                        &preflight.default_branch,
+                        &first_open.head_ref_name,
+                    ) {
+                        Ok(needs_sync) => needs_sync,
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(1);
+                        }
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let steps = stack::build_sync_plan_with_options(
+                &stack,
+                &preflight.default_branch,
+                force_rewrite_first_open,
+            );
             if steps.is_empty() {
                 println!("Stack is already up to date. No sync needed.");
                 return ExitCode::SUCCESS;

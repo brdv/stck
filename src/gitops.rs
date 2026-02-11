@@ -62,6 +62,24 @@ pub fn rebase_in_progress() -> Result<bool, String> {
     Ok(git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists())
 }
 
+pub fn branch_needs_sync_with_default(default_branch: &str, branch: &str) -> Result<bool, String> {
+    let default_ref = format!("refs/remotes/origin/{default_branch}");
+    let branch_ref = format!("refs/heads/{branch}");
+    let output = Command::new("git")
+        .args(["merge-base", "--is-ancestor", &default_ref, &branch_ref])
+        .output()
+        .map_err(|_| "failed to run `git merge-base --is-ancestor`".to_string())?;
+
+    match output.status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(format!(
+            "failed to compare {} against {}; ensure refs are available locally",
+            default_ref, branch_ref
+        )),
+    }
+}
+
 pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["rebase", "--onto", new_base, old_base, branch])
