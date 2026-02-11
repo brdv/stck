@@ -540,9 +540,23 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             } else {
                 stack::build_push_retargets(&stack, &preflight.default_branch)
             };
+            let mut push_branches = Vec::new();
+            for branch in stack::build_push_branches(&stack) {
+                let needs_push = match gitops::branch_needs_push(&branch) {
+                    Ok(needs_push) => needs_push,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
+
+                if needs_push {
+                    push_branches.push(branch);
+                }
+            }
 
             let state = PushState {
-                push_branches: stack::build_push_branches(&stack),
+                push_branches,
                 completed_pushes: 0,
                 retargets,
                 completed_retargets: 0,

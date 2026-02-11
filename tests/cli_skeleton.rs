@@ -100,6 +100,10 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
       echo "ffffffffffffffffffffffffffffffffffffffff"
       exit 0
     fi
+    if [[ ",${STCK_TEST_NEEDS_PUSH_BRANCHES:-}," == *",${branch},"* ]]; then
+      echo "ffffffffffffffffffffffffffffffffffffffff"
+      exit 0
+    fi
     case "${branch}" in
       feature-base)
         if [[ -n "${STCK_TEST_REMOTE_FEATURE_BASE_SHA:-}" ]]; then
@@ -572,6 +576,10 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
     let log_path = std::env::temp_dir().join("stck-push.log");
     let _ = fs::remove_file(&log_path);
     cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     cmd.arg("push");
 
     cmd.assert()
@@ -622,6 +630,10 @@ fn push_stops_before_retarget_when_a_push_fails() {
     let log_path = std::env::temp_dir().join("stck-push-fail.log");
     let _ = fs::remove_file(&log_path);
     cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     cmd.env("STCK_TEST_PUSH_FAIL_BRANCH", "feature-child");
     cmd.arg("push");
 
@@ -642,6 +654,10 @@ fn push_resumes_after_partial_retarget_failure() {
     let log_path = temp.path().join("push-resume.log");
     let marker_path = temp.path().join("retarget-fail-once.marker");
     first.env("STCK_TEST_LOG", log_path.as_os_str());
+    first.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     first.env("STCK_TEST_RETARGET_FAIL_ONCE_FILE", marker_path.as_os_str());
     first.env("STCK_TEST_RETARGET_FAIL_ONCE_BRANCH", "feature-child");
     first.arg("push");
@@ -666,6 +682,10 @@ fn push_resumes_after_partial_retarget_failure() {
     resume.env("PATH", full_path);
     resume.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
     resume.env("STCK_TEST_LOG", log_path.as_os_str());
+    resume.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     resume.arg("push");
 
     resume
@@ -700,6 +720,10 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
     let _ = fs::remove_file(&log_path);
 
     sync.env("STCK_TEST_LOG", log_path.as_os_str());
+    sync.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     sync.arg("sync");
     sync.assert().success();
 
@@ -719,6 +743,10 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
     push.env("PATH", full_path);
     push.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
     push.env("STCK_TEST_LOG", log_path.as_os_str());
+    push.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
     push.env("STCK_TEST_SYNC_NOOP", "1");
     push.arg("push");
 
@@ -734,6 +762,25 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
     assert!(
         !cached_plan_path.exists(),
         "push should clear cached sync plan after success"
+    );
+}
+
+#[test]
+fn push_skips_branches_without_local_changes() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-push-no-divergence.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("push");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Push succeeded. Pushed 0 branch(es) and applied 2 PR base update(s).",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    assert!(
+        !log.contains("push --force-with-lease"),
+        "push should skip branches without divergence"
     );
 }
 
