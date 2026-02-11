@@ -1,4 +1,5 @@
 use crate::github::PullRequest;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusLine {
@@ -23,7 +24,7 @@ pub struct StatusReport {
     pub summary: StatusSummary,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncStep {
     pub branch: String,
     pub old_base_ref: String,

@@ -97,9 +97,23 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
   fi
 fi
 
+if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--git-dir" ]]; then
+  if [[ -n "${STCK_TEST_GIT_DIR:-}" ]]; then
+    echo "${STCK_TEST_GIT_DIR}"
+  else
+    echo ".git"
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ -n "${STCK_TEST_REBASE_FAIL_ONCE_FILE:-}" && ! -f "${STCK_TEST_REBASE_FAIL_ONCE_FILE}" ]]; then
+    mkdir -p "$(dirname "${STCK_TEST_REBASE_FAIL_ONCE_FILE}")"
+    touch "${STCK_TEST_REBASE_FAIL_ONCE_FILE}"
+    exit 1
   fi
   if [[ "${STCK_TEST_REBASE_FAIL:-0}" == "1" ]]; then
     exit 1
@@ -167,9 +181,12 @@ fn stck_cmd_with_stubbed_tools() -> (TempDir, Command) {
     let temp = setup_stubbed_tools();
     let path = std::env::var("PATH").expect("PATH should be set");
     let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    let git_dir = temp.path().join("git-dir");
+    fs::create_dir_all(&git_dir).expect("git dir should be created");
 
     let mut cmd = stck_cmd();
     cmd.env("PATH", full_path);
+    cmd.env("STCK_TEST_GIT_DIR", git_dir.as_os_str());
     (temp, cmd)
 }
 
@@ -242,6 +259,72 @@ fn sync_surfaces_rebase_failure_with_guidance() {
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
     ));
+}
+
+#[test]
+fn sync_continue_requires_existing_state() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.args(["sync", "--continue"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: no sync state found; run `stck sync` first",
+    ));
+}
+
+#[test]
+fn sync_continue_resumes_after_previous_failure() {
+    let (temp, mut first) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("rebase.log");
+    let fail_once_path = temp.path().join("fail-once.marker");
+
+    first.env("STCK_TEST_LOG", log_path.as_os_str());
+    first.env(
+        "STCK_TEST_REBASE_FAIL_ONCE_FILE",
+        fail_once_path.as_os_str(),
+    );
+    first.arg("sync");
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
+
+    let state_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-plan.json");
+    assert!(
+        state_path.exists(),
+        "sync state should persist after failure"
+    );
+
+    let mut resume = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    resume.env("PATH", full_path);
+    resume.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    resume.env("STCK_TEST_LOG", log_path.as_os_str());
+    resume.args(["sync", "--continue"]);
+
+    resume
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
+        ))
+        .stdout(predicate::str::contains(
+            "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("rebase log should exist");
+    let first_step = "rebase --onto main 1111111111111111111111111111111111111111 feature-branch";
+    let second_step =
+        "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child";
+    assert_eq!(log.matches(first_step).count(), 1);
+    assert_eq!(log.matches(second_step).count(), 1);
+    assert!(
+        !state_path.exists(),
+        "sync state should be removed after success"
+    );
 }
 
 #[test]
