@@ -818,6 +818,16 @@ fn sync_continue_requires_existing_state() {
 }
 
 #[test]
+fn sync_rejects_continue_and_reset_together() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.args(["sync", "--continue", "--reset"]);
+
+    cmd.assert().code(2).stderr(predicate::str::contains(
+        "the argument '--continue' cannot be used with '--reset'",
+    ));
+}
+
+#[test]
 fn sync_continue_resumes_after_previous_failure() {
     let (temp, mut first) = stck_cmd_with_stubbed_tools();
     let log_path = temp.path().join("rebase.log");
@@ -874,6 +884,59 @@ fn sync_continue_resumes_after_previous_failure() {
     assert!(
         !state_path.exists(),
         "sync state should be removed after success"
+    );
+}
+
+#[test]
+fn sync_reset_recomputes_from_scratch_after_failure() {
+    let (temp, mut first) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("rebase-reset.log");
+    let fail_once_path = temp.path().join("fail-once-reset.marker");
+
+    first.env("STCK_TEST_LOG", log_path.as_os_str());
+    first.env(
+        "STCK_TEST_REBASE_FAIL_ONCE_FILE",
+        fail_once_path.as_os_str(),
+    );
+    first.arg("sync");
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-branch;",
+    ));
+
+    let mut reset = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    reset.env("PATH", full_path);
+    reset.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    reset.env("STCK_TEST_LOG", log_path.as_os_str());
+    reset.args(["sync", "--reset"]);
+
+    reset
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Cleared previous sync state. Recomputing from scratch.",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto main 1111111111111111111111111111111111111111 feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("rebase log should exist");
+    let first_step = "rebase --onto main 1111111111111111111111111111111111111111 feature-branch";
+    let second_step =
+        "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child";
+    assert_eq!(
+        log.matches(first_step).count(),
+        2,
+        "reset should rerun first step from scratch"
+    );
+    assert_eq!(
+        log.matches(second_step).count(),
+        1,
+        "second step should run once on reset recompute"
     );
 }
 
