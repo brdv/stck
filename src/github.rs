@@ -31,8 +31,11 @@ pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "failed to retarget PR base for branch {branch} to {new_base}; fix the GitHub error and rerun `stck push`"
+        Err(with_stderr(
+            &format!(
+                "failed to retarget PR base for branch {branch} to {new_base}; fix the GitHub error and rerun `stck push`"
+            ),
+            &output.stderr,
         ))
     }
 }
@@ -52,8 +55,11 @@ pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
             {
                 Ok(false)
             } else {
-                Err(format!(
-                    "failed to check PR for branch {branch}; ensure `gh auth status` succeeds and retry"
+                Err(with_stderr(
+                    &format!(
+                        "failed to check PR for branch {branch}; ensure `gh auth status` succeeds and retry"
+                    ),
+                    &output.stderr,
                 ))
             }
         }
@@ -72,8 +78,9 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "failed to create PR for branch {head}; fix the GitHub error and retry"
+        Err(with_stderr(
+            &format!("failed to create PR for branch {head}; fix the GitHub error and retry"),
+            &output.stderr,
         ))
     }
 }
@@ -94,7 +101,10 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
         .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
 
     if !output.status.success() {
-        return Err("failed to list pull requests from GitHub; ensure `gh auth status` succeeds and the repository is accessible".to_string());
+        return Err(with_stderr(
+            "failed to list pull requests from GitHub; ensure `gh auth status` succeeds and the repository is accessible",
+            &output.stderr,
+        ));
     }
 
     parse_pull_requests_json(&output.stdout)
@@ -103,6 +113,15 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
 fn parse_pull_requests_json(bytes: &[u8]) -> Result<Vec<PullRequest>, String> {
     serde_json::from_slice::<Vec<PullRequest>>(bytes)
         .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())
+}
+
+fn with_stderr(base: &str, stderr: &[u8]) -> String {
+    let detail = String::from_utf8_lossy(stderr).trim().to_string();
+    if detail.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}; stderr: {detail}")
+    }
 }
 
 pub fn build_linear_stack(

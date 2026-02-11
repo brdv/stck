@@ -161,6 +161,9 @@ if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
   fi
+  if [[ "${STCK_TEST_REBASE_FAIL_STDERR:-0}" == "1" ]]; then
+    echo "CONFLICT (content): Merge conflict in src/main.rs" >&2
+  fi
   if [[ -n "${STCK_TEST_REBASE_FAIL_ONCE_FILE:-}" && ! -f "${STCK_TEST_REBASE_FAIL_ONCE_FILE}" ]]; then
     mkdir -p "$(dirname "${STCK_TEST_REBASE_FAIL_ONCE_FILE}")"
     touch "${STCK_TEST_REBASE_FAIL_ONCE_FILE}"
@@ -648,6 +651,18 @@ fn sync_surfaces_rebase_failure_with_guidance() {
 
     cmd.assert().code(1).stderr(predicate::str::contains(
         "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
+}
+
+#[test]
+fn sync_includes_rebase_stderr_on_failure() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_REBASE_FAIL", "1");
+    cmd.env("STCK_TEST_REBASE_FAIL_STDERR", "1");
+    cmd.arg("sync");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "stderr: CONFLICT (content): Merge conflict in src/main.rs",
     ));
 }
 
