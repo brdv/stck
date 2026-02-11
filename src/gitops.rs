@@ -77,6 +77,21 @@ pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), S
     }
 }
 
+pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["push", "--force-with-lease", "origin", branch])
+        .output()
+        .map_err(|_| "failed to run `git push`; ensure this is a git repository".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "push failed for branch {branch}; fix the push error and rerun `stck push`"
+        ))
+    }
+}
+
 fn rev_parse(reference: &str) -> Result<String, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", reference])

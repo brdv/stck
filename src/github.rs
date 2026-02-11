@@ -22,6 +22,21 @@ pub fn discover_linear_stack(
     build_linear_stack(&prs, current_branch, default_branch)
 }
 
+pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
+    let output = Command::new("gh")
+        .args(["pr", "edit", branch, "--base", new_base])
+        .output()
+        .map_err(|_| "failed to run `gh pr edit`; ensure GitHub CLI is installed".to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to retarget PR base for branch {branch} to {new_base}; fix the GitHub error and rerun `stck push`"
+        ))
+    }
+}
+
 fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([

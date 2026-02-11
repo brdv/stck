@@ -121,6 +121,17 @@ if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "push" && "${2:-}" == "--force-with-lease" && "${3:-}" == "origin" ]]; then
+  branch="${4:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_PUSH_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -175,6 +186,22 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
+  branch="${3:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ -n "${STCK_TEST_RETARGET_FAIL_ONCE_FILE:-}" && "${STCK_TEST_RETARGET_FAIL_ONCE_BRANCH:-}" == "${branch}" && ! -f "${STCK_TEST_RETARGET_FAIL_ONCE_FILE}" ]]; then
+    mkdir -p "$(dirname "${STCK_TEST_RETARGET_FAIL_ONCE_FILE}")"
+    touch "${STCK_TEST_RETARGET_FAIL_ONCE_FILE}"
+    exit 1
+  fi
+  if [[ "${STCK_TEST_RETARGET_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -210,20 +237,131 @@ fn help_lists_all_commands() {
 
 #[test]
 fn commands_show_placeholder_when_preflight_passes() {
-    for command in ["new", "push"] {
-        let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
-        if command == "new" {
-            cmd.args([command, "feature-x"]);
-        } else {
-            cmd.arg(command);
-        }
+    let command = "new";
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.args([command, "feature-x"]);
 
-        cmd.assert()
-            .code(1)
-            .stderr(predicate::str::contains(format!(
-                "error: `stck {command}` is not implemented yet"
-            )));
-    }
+    cmd.assert()
+        .code(1)
+        .stderr(predicate::str::contains(format!(
+            "error: `stck {command}` is not implemented yet"
+        )));
+}
+
+#[test]
+fn push_executes_pushes_before_retargets_and_prints_summary() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-push.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("push");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease origin feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease origin feature-child",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr edit feature-branch --base main",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr edit feature-child --base feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s).",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    let push_idx = log
+        .find("push --force-with-lease origin feature-child")
+        .expect("second push command missing");
+    let retarget_idx = log
+        .find("pr edit feature-branch --base main")
+        .expect("first retarget command missing");
+    assert!(
+        push_idx < retarget_idx,
+        "retarget should start only after pushes complete"
+    );
+}
+
+#[test]
+fn push_stops_before_retarget_when_a_push_fails() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-push-fail.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_PUSH_FAIL_BRANCH", "feature-child");
+    cmd.arg("push");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: push failed for branch feature-child; fix the push error and rerun `stck push`",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    assert!(
+        !log.contains("pr edit"),
+        "retarget should not run when a push fails"
+    );
+}
+
+#[test]
+fn push_resumes_after_partial_retarget_failure() {
+    let (temp, mut first) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("push-resume.log");
+    let marker_path = temp.path().join("retarget-fail-once.marker");
+    first.env("STCK_TEST_LOG", log_path.as_os_str());
+    first.env("STCK_TEST_RETARGET_FAIL_ONCE_FILE", marker_path.as_os_str());
+    first.env("STCK_TEST_RETARGET_FAIL_ONCE_BRANCH", "feature-child");
+    first.arg("push");
+
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: failed to retarget PR base for branch feature-child to feature-branch; fix the GitHub error and rerun `stck push`",
+    ));
+
+    let state_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-plan.json");
+    assert!(
+        state_path.exists(),
+        "push state should persist after partial failure"
+    );
+
+    let mut resume = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    resume.env("PATH", full_path);
+    resume.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    resume.env("STCK_TEST_LOG", log_path.as_os_str());
+    resume.arg("push");
+
+    resume
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ gh pr edit feature-child --base feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s).",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    let push_a = "push --force-with-lease origin feature-branch";
+    let push_b = "push --force-with-lease origin feature-child";
+    let retarget_a = "pr edit feature-branch --base main";
+    let retarget_b = "pr edit feature-child --base feature-branch";
+    assert_eq!(log.matches(push_a).count(), 1);
+    assert_eq!(log.matches(push_b).count(), 1);
+    assert_eq!(log.matches(retarget_a).count(), 1);
+    assert_eq!(log.matches(retarget_b).count(), 2);
+    assert!(
+        !state_path.exists(),
+        "push state should be removed after successful retry"
+    );
 }
 
 #[test]
