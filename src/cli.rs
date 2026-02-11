@@ -633,6 +633,8 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             state
         }
     };
+    let starting_completed_pushes = state.completed_pushes;
+    let starting_completed_retargets = state.completed_retargets;
 
     for index in state.completed_pushes..state.push_branches.len() {
         let branch = &state.push_branches[index];
@@ -683,11 +685,16 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
+    let pushed_this_run = state
+        .completed_pushes
+        .saturating_sub(starting_completed_pushes);
+    let retargeted_this_run = state
+        .completed_retargets
+        .saturating_sub(starting_completed_retargets);
 
     println!(
-        "Push succeeded. Pushed {} branch(es) and applied {} PR base update(s).",
-        state.push_branches.len(),
-        state.retargets.len()
+        "Push succeeded. Pushed {} branch(es) and applied {} PR base update(s) in this run.",
+        pushed_this_run, retargeted_this_run
     );
     ExitCode::SUCCESS
 }
