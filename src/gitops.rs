@@ -52,6 +52,51 @@ pub fn resolve_old_base_for_rebase(base_branch: &str) -> Result<String, String> 
     ))
 }
 
+pub fn derive_rebase_boundary(
+    old_base_branch: &str,
+    new_base_branch: &str,
+    branch: &str,
+) -> Result<String, String> {
+    let branch_ref = format!("refs/heads/{branch}");
+    let old_base_candidates = [
+        format!("refs/heads/{old_base_branch}"),
+        format!("refs/remotes/origin/{old_base_branch}"),
+    ];
+
+    for base_ref in old_base_candidates
+        .iter()
+        .filter(|candidate| rev_parse(candidate).is_ok())
+    {
+        if let Ok(sha) = merge_base_fork_point(base_ref, &branch_ref) {
+            return Ok(sha);
+        }
+    }
+
+    for base_ref in old_base_candidates
+        .iter()
+        .filter(|candidate| rev_parse(candidate).is_ok())
+    {
+        if let Ok(sha) = merge_base(base_ref, &branch_ref) {
+            return Ok(sha);
+        }
+    }
+
+    let new_base_candidates = [
+        format!("refs/heads/{new_base_branch}"),
+        format!("refs/remotes/origin/{new_base_branch}"),
+    ];
+    for base_ref in new_base_candidates
+        .iter()
+        .filter(|candidate| rev_parse(candidate).is_ok())
+    {
+        if let Ok(sha) = merge_base(base_ref, &branch_ref) {
+            return Ok(sha);
+        }
+    }
+
+    resolve_old_base_for_rebase(old_base_branch)
+}
+
 pub fn git_dir() -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-dir"])
@@ -247,6 +292,42 @@ fn rev_parse(reference: &str) -> Result<String, String> {
     let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if sha.is_empty() {
         Err(format!("git reference `{reference}` resolved to empty SHA"))
+    } else {
+        Ok(sha)
+    }
+}
+
+fn merge_base_fork_point(base: &str, branch: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(["merge-base", "--fork-point", base, branch])
+        .output()
+        .map_err(|_| "failed to run `git merge-base --fork-point`".to_string())?;
+
+    if !output.status.success() {
+        return Err("no valid fork-point found".to_string());
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        Err("`git merge-base --fork-point` returned empty output".to_string())
+    } else {
+        Ok(sha)
+    }
+}
+
+fn merge_base(base: &str, branch: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(["merge-base", base, branch])
+        .output()
+        .map_err(|_| "failed to run `git merge-base`".to_string())?;
+
+    if !output.status.success() {
+        return Err("failed to compute merge-base".to_string());
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        Err("`git merge-base` returned empty output".to_string())
     } else {
         Ok(sha)
     }

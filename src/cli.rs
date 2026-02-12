@@ -484,7 +484,11 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
         };
-        let old_base_sha = match gitops::resolve_old_base_for_rebase(&step.old_base_ref) {
+        let old_base_sha = match gitops::derive_rebase_boundary(
+            &step.old_base_ref,
+            &step.new_base_ref,
+            &step.branch,
+        ) {
             Ok(sha) => sha,
             Err(message) => {
                 eprintln!("error: {message}");

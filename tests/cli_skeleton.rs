@@ -171,6 +171,71 @@ if [[ "${1:-}" == "rev-list" && "${2:-}" == "--count" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "merge-base" && "${2:-}" == "--fork-point" ]]; then
+  base="${3:-}"
+  branch="${4:-}"
+
+  if [[ "${STCK_TEST_FORK_POINT_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
+
+  if [[ "${base}" == "refs/heads/feature-base" || "${base}" == "refs/remotes/origin/feature-base" ]]; then
+    if [[ "${branch}" == "refs/heads/feature-branch" ]]; then
+      echo "1111111111111111111111111111111111111111"
+      exit 0
+    fi
+  fi
+
+  if [[ "${base}" == "refs/heads/feature-branch" || "${base}" == "refs/remotes/origin/feature-branch" ]]; then
+    if [[ "${branch}" == "refs/heads/feature-child" ]]; then
+      echo "2222222222222222222222222222222222222222"
+      exit 0
+    fi
+  fi
+
+  exit 1
+fi
+
+if [[ "${1:-}" == "merge-base" && "${2:-}" != "--is-ancestor" ]]; then
+  base="${2:-}"
+  branch="${3:-}"
+
+  if [[ "${STCK_TEST_MERGE_BASE_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
+
+  if [[ "${base}" == "refs/heads/feature-base" || "${base}" == "refs/remotes/origin/feature-base" ]]; then
+    if [[ "${branch}" == "refs/heads/feature-branch" ]]; then
+      echo "1111111111111111111111111111111111111111"
+      exit 0
+    fi
+  fi
+
+  if [[ "${base}" == "refs/heads/feature-branch" || "${base}" == "refs/remotes/origin/feature-branch" ]]; then
+    if [[ "${branch}" == "refs/heads/feature-child" ]]; then
+      if [[ -n "${STCK_TEST_FEATURE_CHILD_BOUNDARY_SHA:-}" ]]; then
+        echo "${STCK_TEST_FEATURE_CHILD_BOUNDARY_SHA}"
+      else
+        echo "2222222222222222222222222222222222222222"
+      fi
+      exit 0
+    fi
+  fi
+
+  if [[ "${base}" == "refs/heads/main" || "${base}" == "refs/remotes/origin/main" ]]; then
+    if [[ "${branch}" == "refs/heads/feature-branch" ]]; then
+      echo "1111111111111111111111111111111111111111"
+      exit 0
+    fi
+    if [[ "${branch}" == "refs/heads/feature-child" ]]; then
+      echo "2222222222222222222222222222222222222222"
+      exit 0
+    fi
+  fi
+
+  exit 1
+fi
+
 if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
   ancestor="${3:-}"
   descendant="${4:-}"
@@ -880,6 +945,38 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
 }
 
 #[test]
+fn sync_uses_merge_base_when_fork_point_is_unavailable() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_FORK_POINT_FAIL", "1");
+    cmd.env(
+        "STCK_TEST_FEATURE_CHILD_BOUNDARY_SHA",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    cmd.arg("sync");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "$ git rebase --onto feature-branch bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb feature-child",
+    ));
+}
+
+#[test]
+fn sync_falls_back_to_old_base_ref_when_merge_base_lookups_fail() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_FORK_POINT_FAIL", "1");
+    cmd.env("STCK_TEST_MERGE_BASE_FAIL", "1");
+    cmd.env(
+        "STCK_TEST_REMOTE_FEATURE_BASE_SHA",
+        "9999999999999999999999999999999999999999",
+    );
+    cmd.env("STCK_TEST_MISSING_LOCAL_BRANCH_REF", "feature-base");
+    cmd.arg("sync");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "$ git rebase --onto main 9999999999999999999999999999999999999999 feature-branch",
+    ));
+}
+
+#[test]
 fn sync_uses_remote_old_base_when_local_old_base_is_missing() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.env("STCK_TEST_MISSING_LOCAL_BRANCH_REF", "feature-base");
@@ -890,7 +987,7 @@ fn sync_uses_remote_old_base_when_local_old_base_is_missing() {
     cmd.arg("sync");
 
     cmd.assert().success().stdout(predicate::str::contains(
-        "$ git rebase --onto main 9999999999999999999999999999999999999999 feature-branch",
+        "$ git rebase --onto main 1111111111111111111111111111111111111111 feature-branch",
     ));
 }
 
@@ -1013,7 +1110,7 @@ fn sync_continue_resumes_after_previous_failure() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ git rebase --onto feature-branch bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb feature-child",
+            "$ git rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child",
         ))
         .stdout(predicate::str::contains(
             "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
@@ -1022,7 +1119,7 @@ fn sync_continue_resumes_after_previous_failure() {
     let log = fs::read_to_string(&log_path).expect("rebase log should exist");
     let first_step = "rebase --onto main 1111111111111111111111111111111111111111 feature-branch";
     let second_step =
-        "rebase --onto feature-branch bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb feature-child";
+        "rebase --onto feature-branch 2222222222222222222222222222222222222222 feature-child";
     assert_eq!(log.matches(first_step).count(), 1);
     assert_eq!(log.matches(second_step).count(), 1);
     assert!(
