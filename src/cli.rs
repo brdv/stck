@@ -213,12 +213,19 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         };
 
         if !current_has_pr {
+            let bootstrap_base = match infer_bootstrap_base_for_current_branch(preflight) {
+                Ok(base) => base,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+
             println!(
                 "$ gh pr create --base {} --head {} --title {} --body \"\"",
-                preflight.default_branch, current_branch, current_branch
+                bootstrap_base, current_branch, current_branch
             );
-            if let Err(message) =
-                github::create_pr(&preflight.default_branch, current_branch, current_branch)
+            if let Err(message) = github::create_pr(&bootstrap_base, current_branch, current_branch)
             {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
@@ -267,6 +274,47 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         new_branch, pr_base_branch
     );
     ExitCode::SUCCESS
+}
+
+fn infer_bootstrap_base_for_current_branch(
+    preflight: &env::PreflightContext,
+) -> Result<String, String> {
+    let current_branch = &preflight.current_branch;
+    let current_ref = format!("refs/heads/{current_branch}");
+    let prs = github::list_pull_requests()?;
+
+    let mut best_parent: Option<(usize, String)> = None;
+    for pr in prs {
+        if pr.head_ref_name == *current_branch {
+            continue;
+        }
+
+        let candidate_ref = format!("refs/heads/{}", pr.head_ref_name);
+        let is_ancestor = match gitops::ref_is_ancestor(&candidate_ref, &current_ref) {
+            Ok(is_ancestor) => is_ancestor,
+            Err(_) => continue,
+        };
+        if !is_ancestor {
+            continue;
+        }
+
+        let distance = match gitops::commit_distance(&candidate_ref, &current_ref) {
+            Ok(distance) => distance,
+            Err(_) => continue,
+        };
+        if distance == 0 {
+            continue;
+        }
+
+        match &best_parent {
+            Some((best_distance, _)) if *best_distance <= distance => {}
+            _ => best_parent = Some((distance, pr.head_ref_name)),
+        }
+    }
+
+    Ok(best_parent
+        .map(|(_, branch)| branch)
+        .unwrap_or_else(|| preflight.default_branch.clone()))
 }
 
 fn run_submit(preflight: &env::PreflightContext, base_override: Option<&str>) -> ExitCode {
@@ -484,7 +532,11 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
         };
-        let old_base_sha = match gitops::resolve_old_base_for_rebase(&step.old_base_ref) {
+        let old_base_sha = match gitops::derive_rebase_boundary(
+            &step.old_base_ref,
+            &step.new_base_ref,
+            &step.branch,
+        ) {
             Ok(sha) => sha,
             Err(message) => {
                 eprintln!("error: {message}");

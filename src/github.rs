@@ -87,7 +87,7 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     }
 }
 
-fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
+pub fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([
             "pr",
