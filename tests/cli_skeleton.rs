@@ -1575,6 +1575,22 @@ fn status_reports_needs_push_when_branch_diverges_from_origin() {
 }
 
 #[test]
+fn status_skips_needs_push_for_merged_branches() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_MISSING_REMOTE_BRANCH", "feature-base");
+    cmd.arg("status");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "feature-base PR #100 MERGED base=main",
+        ))
+        .stdout(predicate::str::contains(
+            "Summary: 1 needs_sync, 0 needs_push, 0 base_mismatch",
+        ));
+}
+
+#[test]
 fn status_reports_needs_sync_when_default_branch_has_advanced() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.env("STCK_TEST_SYNC_NOOP", "1");
