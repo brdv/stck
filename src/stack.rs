@@ -1,11 +1,11 @@
-use crate::github::PullRequest;
+use crate::github::{PrState, PullRequest};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusLine {
     pub branch: String,
     pub number: u64,
-    pub state: String,
+    pub state: PrState,
     pub base: String,
     pub head: String,
     pub flags: Vec<&'static str>,
@@ -51,11 +51,8 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
         };
 
         let has_base_mismatch = pr.base_ref_name != expected_base;
-        let parent_is_merged = index > 0
-            && (stack[index - 1].state == "MERGED" || stack[index - 1].merged_at.is_some());
+        let parent_is_merged = index > 0 && stack[index - 1].state == PrState::Merged;
 
-        // Milestone 4 scope: compute stack-based indicators from PR graph.
-        // Push divergence checks will be added in later milestones.
         let has_needs_push = false;
         let has_needs_sync = has_base_mismatch || parent_is_merged;
 
@@ -76,7 +73,7 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
         lines.push(StatusLine {
             branch: pr.head_ref_name.clone(),
             number: pr.number,
-            state: pr.state.clone(),
+            state: pr.state,
             base: pr.base_ref_name.clone(),
             head: pr.head_ref_name.clone(),
             flags,
@@ -97,9 +94,7 @@ pub fn first_open_branch_rooted_on_default<'a>(
     stack: &'a [PullRequest],
     default_branch: &str,
 ) -> Option<&'a PullRequest> {
-    let first_open = stack
-        .iter()
-        .find(|pr| pr.state != "MERGED" && pr.merged_at.is_none())?;
+    let first_open = stack.iter().find(|pr| pr.state != PrState::Merged)?;
 
     if first_open.base_ref_name == default_branch {
         Some(first_open)
@@ -123,7 +118,7 @@ pub fn build_sync_plan_with_options(
     let mut seen_first_open = false;
 
     for pr in stack {
-        if pr.state == "MERGED" || pr.merged_at.is_some() {
+        if pr.state == PrState::Merged {
             continue;
         }
 
@@ -153,7 +148,7 @@ pub fn build_sync_plan_with_options(
 pub fn build_push_branches(stack: &[PullRequest]) -> Vec<String> {
     stack
         .iter()
-        .filter(|pr| pr.state != "MERGED" && pr.merged_at.is_none())
+        .filter(|pr| pr.state != PrState::Merged)
         .map(|pr| pr.head_ref_name.clone())
         .collect()
 }
@@ -174,23 +169,22 @@ mod tests {
         build_push_branches, build_push_retargets, build_status_report, build_sync_plan,
         first_open_branch_rooted_on_default, RetargetStep, SyncStep,
     };
-    use crate::github::PullRequest;
+    use crate::github::{PrState, PullRequest};
 
-    fn pr(number: u64, head: &str, base: &str, state: &str) -> PullRequest {
+    fn pr(number: u64, head: &str, base: &str, state: PrState) -> PullRequest {
         PullRequest {
             number,
             head_ref_name: head.to_string(),
             base_ref_name: base.to_string(),
-            state: state.to_string(),
-            merged_at: None,
+            state,
         }
     }
 
     #[test]
     fn reports_no_flags_for_aligned_open_stack() {
         let stack = vec![
-            pr(100, "feature-a", "main", "OPEN"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Open),
+            pr(101, "feature-b", "feature-a", PrState::Open),
         ];
 
         let report = build_status_report(&stack, "main");
@@ -205,8 +199,8 @@ mod tests {
     #[test]
     fn reports_needs_sync_when_parent_is_merged() {
         let stack = vec![
-            pr(100, "feature-a", "main", "MERGED"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Open),
         ];
 
         let report = build_status_report(&stack, "main");
@@ -219,8 +213,8 @@ mod tests {
     #[test]
     fn detects_first_open_branch_rooted_on_default() {
         let stack = vec![
-            pr(100, "feature-a", "main", "OPEN"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Open),
+            pr(101, "feature-b", "feature-a", PrState::Open),
         ];
 
         let first = first_open_branch_rooted_on_default(&stack, "main")
@@ -231,8 +225,8 @@ mod tests {
     #[test]
     fn returns_none_when_first_open_branch_not_rooted_on_default() {
         let stack = vec![
-            pr(100, "feature-a", "main", "MERGED"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Open),
         ];
 
         assert!(first_open_branch_rooted_on_default(&stack, "main").is_none());
@@ -241,8 +235,8 @@ mod tests {
     #[test]
     fn reports_base_mismatch_and_needs_sync_together() {
         let stack = vec![
-            pr(100, "feature-a", "main", "OPEN"),
-            pr(101, "feature-b", "main", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Open),
+            pr(101, "feature-b", "main", PrState::Open),
         ];
 
         let report = build_status_report(&stack, "main");
@@ -255,8 +249,8 @@ mod tests {
     #[test]
     fn sync_plan_is_empty_when_open_stack_is_aligned() {
         let stack = vec![
-            pr(100, "feature-a", "main", "OPEN"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Open),
+            pr(101, "feature-b", "feature-a", PrState::Open),
         ];
 
         let plan = build_sync_plan(&stack, "main");
@@ -266,9 +260,9 @@ mod tests {
     #[test]
     fn sync_plan_restacks_child_of_merged_parent_and_descendants() {
         let stack = vec![
-            pr(100, "feature-a", "main", "MERGED"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
-            pr(102, "feature-c", "feature-b", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Open),
+            pr(102, "feature-c", "feature-b", PrState::Open),
         ];
 
         let plan = build_sync_plan(&stack, "main");
@@ -292,8 +286,8 @@ mod tests {
     #[test]
     fn sync_plan_restacks_on_base_mismatch() {
         let stack = vec![
-            pr(100, "feature-a", "main", "OPEN"),
-            pr(101, "feature-b", "main", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Open),
+            pr(101, "feature-b", "main", PrState::Open),
         ];
 
         let plan = build_sync_plan(&stack, "main");
@@ -310,9 +304,9 @@ mod tests {
     #[test]
     fn push_branches_include_only_open_pr_branches() {
         let stack = vec![
-            pr(100, "feature-a", "main", "MERGED"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
-            pr(102, "feature-c", "feature-b", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Open),
+            pr(102, "feature-c", "feature-b", PrState::Open),
         ];
 
         let branches = build_push_branches(&stack);
@@ -325,9 +319,9 @@ mod tests {
     #[test]
     fn push_retargets_follow_sync_plan_targets() {
         let stack = vec![
-            pr(100, "feature-a", "main", "MERGED"),
-            pr(101, "feature-b", "feature-a", "OPEN"),
-            pr(102, "feature-c", "feature-b", "OPEN"),
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Open),
+            pr(102, "feature-c", "feature-b", PrState::Open),
         ];
 
         let retargets = build_push_retargets(&stack, "main");

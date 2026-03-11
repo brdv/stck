@@ -637,7 +637,6 @@ fn submit_defaults_base_to_default_branch() {
 }
 
 #[test]
-#[test]
 fn submit_falls_back_to_default_when_no_parent_pr() {
     // When no open parent PR exists, submit should default to the default branch
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
@@ -667,11 +666,9 @@ fn submit_explicit_base_overrides_parent_discovery() {
     );
     cmd.args(["submit", "--base", "main"]);
 
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "$ gh pr create --base main --head feature-branch",
-        ));
+    cmd.assert().success().stdout(predicate::str::contains(
+        "$ gh pr create --base main --head feature-branch",
+    ));
 
     let log = fs::read_to_string(&log_path).expect("submit log should exist");
     assert!(log.contains("pr create --base main --head feature-branch"));

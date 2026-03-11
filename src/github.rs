@@ -4,6 +4,24 @@ use std::process::Command;
 
 const PR_LIST_LIMIT: usize = 1000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+}
+
+impl std::fmt::Display for PrState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrState::Open => write!(f, "OPEN"),
+            PrState::Merged => write!(f, "MERGED"),
+            PrState::Closed => write!(f, "CLOSED"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
@@ -11,9 +29,7 @@ pub struct PullRequest {
     pub head_ref_name: String,
     #[serde(rename = "baseRefName")]
     pub base_ref_name: String,
-    pub state: String,
-    #[serde(rename = "mergedAt")]
-    pub merged_at: Option<String>,
+    pub state: PrState,
 }
 
 pub fn discover_linear_stack(
@@ -97,7 +113,7 @@ pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
             "--limit",
             "100",
             "--json",
-            "number,headRefName,baseRefName,state,mergedAt",
+            "number,headRefName,baseRefName,state",
         ])
         .output()
         .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
@@ -122,7 +138,7 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
             "--limit",
             "1000",
             "--json",
-            "number,headRefName,baseRefName,state,mergedAt",
+            "number,headRefName,baseRefName,state",
         ])
         .output()
         .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
@@ -249,15 +265,14 @@ pub fn build_linear_stack(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_linear_stack, enforce_pr_list_limit, PullRequest, PR_LIST_LIMIT};
+    use super::{build_linear_stack, enforce_pr_list_limit, PrState, PullRequest, PR_LIST_LIMIT};
 
     fn pr(number: u64, head: &str, base: &str) -> PullRequest {
         PullRequest {
             number,
             head_ref_name: head.to_string(),
             base_ref_name: base.to_string(),
-            state: "OPEN".to_string(),
-            merged_at: None,
+            state: PrState::Open,
         }
     }
 
@@ -341,8 +356,7 @@ mod tests {
             "number": 101,
             "headRefName": "feature-branch",
             "baseRefName": "main",
-            "state": "OPEN",
-            "mergedAt": null
+            "state": "OPEN"
         }"#;
 
         let parsed: PullRequest =
@@ -351,8 +365,7 @@ mod tests {
         assert_eq!(parsed.number, 101);
         assert_eq!(parsed.head_ref_name, "feature-branch");
         assert_eq!(parsed.base_ref_name, "main");
-        assert_eq!(parsed.state, "OPEN");
-        assert_eq!(parsed.merged_at, None);
+        assert_eq!(parsed.state, PrState::Open);
     }
 
     #[test]
@@ -374,15 +387,13 @@ mod tests {
                 "number": 100,
                 "headRefName": "feature-base",
                 "baseRefName": "main",
-                "state": "MERGED",
-                "mergedAt": "2026-01-01T00:00:00Z"
+                "state": "MERGED"
             },
             {
                 "number": 101,
                 "headRefName": "feature-branch",
                 "baseRefName": "feature-base",
-                "state": "OPEN",
-                "mergedAt": null
+                "state": "OPEN"
             }
         ]"#;
 
@@ -413,8 +424,7 @@ mod tests {
                 number: i as u64,
                 head_ref_name: format!("feature-{i}"),
                 base_ref_name: "main".to_string(),
-                state: "OPEN".to_string(),
-                merged_at: None,
+                state: PrState::Open,
             })
             .collect::<Vec<_>>();
 

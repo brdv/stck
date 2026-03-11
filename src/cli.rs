@@ -293,7 +293,7 @@ fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, St
         if pr.head_ref_name == branch || pr.head_ref_name == default_branch {
             continue;
         }
-        if pr.state != "OPEN" {
+        if pr.state != github::PrState::Open {
             continue;
         }
         let candidate_ref = format!("refs/heads/{}", pr.head_ref_name);
