@@ -59,6 +59,14 @@ pub fn run() -> ExitCode {
 
     match cli.command {
         Commands::Status => {
+            if preflight.current_branch == preflight.default_branch {
+                println!(
+                    "On default branch ({}). Run `stck new <branch>` to start a new stack.",
+                    preflight.default_branch
+                );
+                return ExitCode::SUCCESS;
+            }
+
             if let Err(message) = gitops::fetch_origin() {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
@@ -126,19 +134,24 @@ pub fn run() -> ExitCode {
             println!("Stack: {} <- {}", preflight.default_branch, branch_chain);
 
             for line in report.lines {
-                let flags = if line.flags.is_empty() {
-                    "none".to_string()
+                let marker = if line.branch == preflight.current_branch {
+                    "* "
                 } else {
-                    line.flags.join(",")
+                    "  "
+                };
+                let flags = if line.flags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", line.flags.join(", "))
                 };
                 println!(
-                    "{} PR #{} [{}] base={} head={} flags={}",
-                    line.branch, line.number, line.state, line.base, line.head, flags
+                    "{}{} PR #{} {} base={}{}",
+                    marker, line.branch, line.number, line.state, line.base, flags
                 );
             }
 
             println!(
-                "Summary: needs_sync={} needs_push={} base_mismatch={}",
+                "Summary: {} needs_sync, {} needs_push, {} base_mismatch",
                 report.summary.needs_sync, report.summary.needs_push, report.summary.base_mismatch
             );
 
@@ -162,6 +175,20 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     } else {
         current_branch.as_str()
     };
+
+    match gitops::is_valid_branch_name(new_branch) {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!(
+                "error: `{new_branch}` is not a valid branch name; use only alphanumeric characters, hyphens, underscores, and slashes"
+            );
+            return ExitCode::from(1);
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    }
 
     let local_exists = match gitops::local_branch_exists(new_branch) {
         Ok(exists) => exists,
