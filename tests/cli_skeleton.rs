@@ -1108,6 +1108,47 @@ fn sync_reports_noop_when_stack_is_already_up_to_date() {
 }
 
 #[test]
+fn sync_from_mid_stack_rebases_current_and_descendants() {
+    // Current branch is feature-branch (mid-stack). Sync should rebase both
+    // feature-branch (child of merged feature-base) and feature-child (descendant).
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = std::env::temp_dir().join("stck-sync-mid-stack.log");
+    let _ = fs::remove_file(&log_path);
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("sync");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("feature-branch"))
+        .stdout(predicate::str::contains("feature-child"))
+        .stdout(predicate::str::contains(
+            "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("rebase log should exist");
+    // Both branches should be rebased
+    assert!(
+        log.contains("feature-branch"),
+        "mid-stack branch should be rebased"
+    );
+    assert!(
+        log.contains("feature-child"),
+        "descendant of mid-stack branch should also be rebased"
+    );
+    // feature-branch rebase should come before feature-child
+    let branch_idx = log
+        .find("feature-branch")
+        .expect("feature-branch should appear in log");
+    let child_idx = log
+        .find("feature-child")
+        .expect("feature-child should appear in log");
+    assert!(
+        branch_idx < child_idx,
+        "mid-stack branch should be rebased before its descendant"
+    );
+}
+
+#[test]
 fn sync_rebases_when_default_branch_has_advanced() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = std::env::temp_dir().join("stck-sync-default-advanced.log");
