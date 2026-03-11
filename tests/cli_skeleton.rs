@@ -380,6 +380,10 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
       echo '[{"number":102,"headRefName":"feature-child-a","baseRefName":"feature-branch","state":"OPEN"},{"number":103,"headRefName":"feature-child-b","baseRefName":"feature-branch","state":"OPEN"}]'
       exit 0
     fi
+    if [[ -n "${STCK_TEST_FEATURE_CHILD_BASE:-}" && "${pr_list_base}" == "feature-branch" ]]; then
+      echo "[{\"number\":102,\"headRefName\":\"feature-child\",\"baseRefName\":\"${STCK_TEST_FEATURE_CHILD_BASE}\",\"state\":\"OPEN\"}]"
+      exit 0
+    fi
     if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
       case "${pr_list_base}" in
         main) echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN"}]' ;;
@@ -423,6 +427,16 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
     if [[ "${STCK_TEST_MISSING_CURRENT_PR:-0}" == "1" && "${branch}" == "feature-branch" ]]; then
       echo "no pull requests found for branch ${branch}" >&2
       exit 1
+    fi
+
+    if [[ -n "${STCK_TEST_FEATURE_BRANCH_BASE:-}" && "${branch}" == "feature-branch" ]]; then
+      echo "{\"number\":101,\"headRefName\":\"feature-branch\",\"baseRefName\":\"${STCK_TEST_FEATURE_BRANCH_BASE}\",\"state\":\"OPEN\"}"
+      exit 0
+    fi
+
+    if [[ -n "${STCK_TEST_FEATURE_CHILD_BASE:-}" && "${branch}" == "feature-child" ]]; then
+      echo "{\"number\":102,\"headRefName\":\"feature-child\",\"baseRefName\":\"${STCK_TEST_FEATURE_CHILD_BASE}\",\"state\":\"OPEN\"}"
+      exit 0
     fi
 
     if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" ]]; then
@@ -931,11 +945,9 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
         .stdout(predicate::str::contains(
             "$ gh pr edit feature-branch --base main",
         ))
+        .stdout(predicate::str::contains("$ gh pr edit feature-child --base feature-branch").not())
         .stdout(predicate::str::contains(
-            "$ gh pr edit feature-child --base feature-branch",
-        ))
-        .stdout(predicate::str::contains(
-            "Push succeeded. Pushed 2 branch(es) and applied 2 PR base update(s) in this run.",
+            "Push succeeded. Pushed 2 branch(es) and applied 1 PR base update(s) in this run.",
         ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
@@ -996,6 +1008,7 @@ fn push_resumes_after_partial_retarget_failure() {
         "STCK_TEST_NEEDS_PUSH_BRANCHES",
         "feature-branch,feature-child",
     );
+    first.env("STCK_TEST_FEATURE_CHILD_BASE", "main");
     first.env("STCK_TEST_RETARGET_FAIL_ONCE_FILE", marker_path.as_os_str());
     first.env("STCK_TEST_RETARGET_FAIL_ONCE_BRANCH", "feature-child");
     first.arg("push");
@@ -1024,6 +1037,7 @@ fn push_resumes_after_partial_retarget_failure() {
         "STCK_TEST_NEEDS_PUSH_BRANCHES",
         "feature-branch,feature-child",
     );
+    resume.env("STCK_TEST_FEATURE_CHILD_BASE", "main");
     resume.arg("push");
 
     resume
@@ -1093,10 +1107,66 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
         .stdout(predicate::str::contains(
             "$ gh pr edit feature-branch --base main",
         ))
+        .stdout(predicate::str::contains("$ gh pr edit feature-child --base feature-branch").not())
         .stdout(predicate::str::contains(
-            "$ gh pr edit feature-child --base feature-branch",
+            "Push succeeded. Pushed 2 branch(es) and applied 1 PR base update(s) in this run.",
         ));
 
+    assert!(
+        !cached_plan_path.exists(),
+        "push should clear cached sync plan after success"
+    );
+}
+
+#[test]
+fn push_skips_cached_sync_plan_retargets_that_are_already_satisfied() {
+    let (temp, mut sync) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("push-cached-plan-noop-retargets.log");
+    let _ = fs::remove_file(&log_path);
+
+    sync.env("STCK_TEST_LOG", log_path.as_os_str());
+    sync.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
+    sync.arg("sync");
+    sync.assert().success();
+
+    let cached_plan_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-sync-plan.json");
+    assert!(
+        cached_plan_path.exists(),
+        "sync should persist cached sync plan"
+    );
+
+    let mut push = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    push.env("PATH", full_path);
+    push.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    push.env("STCK_TEST_LOG", log_path.as_os_str());
+    push.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
+    push.env("STCK_TEST_FEATURE_BRANCH_BASE", "main");
+    push.arg("push");
+
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 2 branch(es) and applied 0 PR base update(s) in this run.",
+        ))
+        .stdout(predicate::str::contains("$ gh pr edit").not());
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    assert!(
+        !log.contains("pr edit"),
+        "push should skip retarget calls when cached plan bases are already satisfied"
+    );
     assert!(
         !cached_plan_path.exists(),
         "push should clear cached sync plan after success"
@@ -1112,7 +1182,7 @@ fn push_skips_branches_without_local_changes() {
     cmd.arg("push");
 
     cmd.assert().success().stdout(predicate::str::contains(
-        "Push succeeded. Pushed 0 branch(es) and applied 2 PR base update(s) in this run.",
+        "Push succeeded. Pushed 0 branch(es) and applied 1 PR base update(s) in this run.",
     ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
@@ -1783,8 +1853,9 @@ fn sync_then_push_after_squash_merge_produces_correct_retargets() {
         .stdout(predicate::str::contains(
             "$ gh pr edit feature-branch --base main",
         ))
+        .stdout(predicate::str::contains("$ gh pr edit feature-child --base feature-branch").not())
         .stdout(predicate::str::contains(
-            "$ gh pr edit feature-child --base feature-branch",
+            "Push succeeded. Pushed 2 branch(es) and applied 1 PR base update(s) in this run.",
         ));
 }
 

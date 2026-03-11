@@ -164,11 +164,26 @@ pub fn build_push_retargets(stack: &[PullRequest], default_branch: &str) -> Vec<
         .collect()
 }
 
+pub fn filter_pending_retargets(
+    retargets: Vec<RetargetStep>,
+    stack: &[PullRequest],
+) -> Vec<RetargetStep> {
+    retargets
+        .into_iter()
+        .filter(
+            |retarget| match stack.iter().find(|pr| pr.head_ref_name == retarget.branch) {
+                Some(pr) => pr.base_ref_name != retarget.new_base_ref,
+                None => true,
+            },
+        )
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_push_branches, build_push_retargets, build_status_report, build_sync_plan,
-        first_open_branch_rooted_on_default, RetargetStep, SyncStep,
+        filter_pending_retargets, first_open_branch_rooted_on_default, RetargetStep, SyncStep,
     };
     use crate::github::{PrState, PullRequest};
 
@@ -394,6 +409,38 @@ mod tests {
             vec![RetargetStep {
                 branch: "feature-c".to_string(),
                 new_base_ref: "main".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn filter_pending_retargets_skips_branches_already_on_target_base() {
+        let stack = vec![
+            pr(101, "feature-b", "main", PrState::Open),
+            pr(102, "feature-c", "feature-b", PrState::Open),
+        ];
+        let retargets = vec![
+            RetargetStep {
+                branch: "feature-b".to_string(),
+                new_base_ref: "main".to_string(),
+            },
+            RetargetStep {
+                branch: "feature-c".to_string(),
+                new_base_ref: "feature-b".to_string(),
+            },
+            RetargetStep {
+                branch: "feature-d".to_string(),
+                new_base_ref: "feature-c".to_string(),
+            },
+        ];
+
+        let pending = filter_pending_retargets(retargets, &stack);
+
+        assert_eq!(
+            pending,
+            vec![RetargetStep {
+                branch: "feature-d".to_string(),
+                new_base_ref: "feature-c".to_string(),
             }]
         );
     }
