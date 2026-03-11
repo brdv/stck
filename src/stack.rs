@@ -54,7 +54,8 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
         let parent_is_merged = index > 0 && stack[index - 1].state == PrState::Merged;
 
         let has_needs_push = false;
-        let has_needs_sync = has_base_mismatch || parent_is_merged;
+        let is_actionable = pr.state != PrState::Merged;
+        let has_needs_sync = is_actionable && (has_base_mismatch || parent_is_merged);
 
         let mut flags = Vec::new();
         if has_base_mismatch {
@@ -338,5 +339,79 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn sync_plan_skips_consecutive_merged_ancestors() {
+        let stack = vec![
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Merged),
+            pr(102, "feature-c", "feature-b", PrState::Open),
+            pr(103, "feature-d", "feature-c", PrState::Open),
+        ];
+
+        let plan = build_sync_plan(&stack, "main");
+        assert_eq!(
+            plan,
+            vec![
+                SyncStep {
+                    branch: "feature-c".to_string(),
+                    old_base_ref: "feature-b".to_string(),
+                    new_base_ref: "main".to_string(),
+                },
+                SyncStep {
+                    branch: "feature-d".to_string(),
+                    old_base_ref: "feature-c".to_string(),
+                    new_base_ref: "feature-c".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn push_branches_skip_consecutive_merged_ancestors() {
+        let stack = vec![
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Merged),
+            pr(102, "feature-c", "feature-b", PrState::Open),
+        ];
+
+        let branches = build_push_branches(&stack);
+        assert_eq!(branches, vec!["feature-c".to_string()]);
+    }
+
+    #[test]
+    fn push_retargets_with_consecutive_merged_ancestors() {
+        let stack = vec![
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Merged),
+            pr(102, "feature-c", "feature-b", PrState::Open),
+        ];
+
+        let retargets = build_push_retargets(&stack, "main");
+        assert_eq!(
+            retargets,
+            vec![RetargetStep {
+                branch: "feature-c".to_string(),
+                new_base_ref: "main".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn status_reports_needs_sync_with_consecutive_merged_ancestors() {
+        let stack = vec![
+            pr(100, "feature-a", "main", PrState::Merged),
+            pr(101, "feature-b", "feature-a", PrState::Merged),
+            pr(102, "feature-c", "feature-b", PrState::Open),
+        ];
+
+        let report = build_status_report(&stack, "main");
+
+        // feature-b is merged itself, so no needs_sync despite merged parent
+        // feature-c is open and its parent (feature-b) is merged → needs_sync
+        assert_eq!(report.summary.needs_sync, 1);
+        assert_eq!(report.lines[1].flags, Vec::<&str>::new());
+        assert_eq!(report.lines[2].flags, vec!["needs_sync"]);
     }
 }
