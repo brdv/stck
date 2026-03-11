@@ -460,6 +460,20 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
 
+            let rebase_in_progress = match gitops::rebase_in_progress() {
+                Ok(in_progress) => in_progress,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+            if rebase_in_progress {
+                eprintln!(
+                    "error: rebase is already in progress; run `git rebase --continue` or `git rebase --abort` before starting a new `stck sync`"
+                );
+                return ExitCode::from(1);
+            }
+
             if let Err(message) = gitops::fetch_origin() {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);

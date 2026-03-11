@@ -1279,6 +1279,18 @@ fn sync_continue_requires_existing_state() {
 }
 
 #[test]
+fn sync_fails_early_when_rebase_is_already_in_progress() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    fs::create_dir_all(temp.path().join("git-dir").join("rebase-merge"))
+        .expect("rebase-merge dir should be created");
+    cmd.arg("sync");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase is already in progress; run `git rebase --continue` or `git rebase --abort` before starting a new `stck sync`",
+    ));
+}
+
+#[test]
 fn sync_rejects_continue_and_reset_together() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.args(["sync", "--continue", "--reset"]);
