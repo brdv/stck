@@ -1,11 +1,21 @@
+//! Repository and toolchain preflight checks required before running commands.
+
 use std::process::Command;
 
+/// Repository context gathered during preflight and reused by command handlers.
 #[derive(Debug, Clone)]
 pub struct PreflightContext {
+    /// The currently checked-out local branch.
     pub current_branch: String,
+    /// The repository's default branch as reported by GitHub.
     pub default_branch: String,
 }
 
+/// Validate the local repository and discover branch context needed by `stck`.
+///
+/// This checks that `git` and `gh` are installed, GitHub authentication is
+/// available, the repository has an `origin` remote, the current HEAD is on a
+/// branch, the working tree is clean, and the default branch can be discovered.
 pub fn run_preflight() -> Result<PreflightContext, String> {
     ensure_command_available("git")?;
     ensure_command_available("gh")?;

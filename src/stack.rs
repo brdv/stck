@@ -1,42 +1,70 @@
+//! Pure stack-planning helpers derived from GitHub PR metadata.
+
 use crate::github::{PrState, PullRequest};
 use serde::{Deserialize, Serialize};
 
+/// Per-branch status information rendered by `stck status`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusLine {
+    /// The PR head branch name.
     pub branch: String,
+    /// The GitHub pull request number.
     pub number: u64,
+    /// The current GitHub state of the PR.
     pub state: PrState,
+    /// The PR's current base branch name.
     pub base: String,
+    /// The PR's current head branch name.
     pub head: String,
+    /// Derived status flags such as `needs_sync` or `base_mismatch`.
     pub flags: Vec<&'static str>,
 }
 
+/// Aggregated counts for actionable status flags across a stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSummary {
+    /// Number of branches that require a sync/rebase operation.
     pub needs_sync: usize,
+    /// Number of branches whose local head differs from `origin`.
     pub needs_push: usize,
+    /// Number of branches whose PR base does not match the expected stack parent.
     pub base_mismatch: usize,
 }
 
+/// Full status output derived from a discovered stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusReport {
+    /// Per-branch status lines in stack order.
     pub lines: Vec<StatusLine>,
+    /// Aggregate flag counts for the same stack.
     pub summary: StatusSummary,
 }
 
+/// A single rebase operation required to restack a branch locally.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncStep {
+    /// The branch that should be rebased.
     pub branch: String,
+    /// The previous base ref used to identify the rebase range.
     pub old_base_ref: String,
+    /// The branch or ref that the branch should end up based on.
     pub new_base_ref: String,
 }
 
+/// A single PR base retarget operation required after pushing rewritten branches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetargetStep {
+    /// The PR head branch whose base should be updated.
     pub branch: String,
+    /// The desired PR base branch after the stack has been rewritten.
     pub new_base_ref: String,
 }
 
+/// Build the status view for a discovered stack.
+///
+/// This function only reasons about GitHub metadata and stack shape. Local
+/// branch divergence from `origin` and default-branch ancestry checks are added
+/// by higher-level command code.
 pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> StatusReport {
     let mut lines = Vec::with_capacity(stack.len());
     let mut needs_sync = 0usize;
@@ -91,6 +119,10 @@ pub fn build_status_report(stack: &[PullRequest], default_branch: &str) -> Statu
     }
 }
 
+/// Return the first open branch whose base already points at the default branch.
+///
+/// When present, this branch is the one that should be checked for default
+/// branch drift against `origin/<default_branch>`.
 pub fn first_open_branch_rooted_on_default<'a>(
     stack: &'a [PullRequest],
     default_branch: &str,
@@ -104,10 +136,16 @@ pub fn first_open_branch_rooted_on_default<'a>(
     }
 }
 
+/// Build the default sync plan for a stack.
 pub fn build_sync_plan(stack: &[PullRequest], default_branch: &str) -> Vec<SyncStep> {
     build_sync_plan_with_options(stack, default_branch, false)
 }
 
+/// Build the sequence of rebase steps needed to restore a linear open stack.
+///
+/// Merged PRs are skipped when choosing the effective parent chain. Once an
+/// open branch needs rewriting, every later open descendant is also rewritten
+/// so the local branch ancestry stays consistent with the intended stack order.
 pub fn build_sync_plan_with_options(
     stack: &[PullRequest],
     default_branch: &str,
@@ -146,6 +184,7 @@ pub fn build_sync_plan_with_options(
     steps
 }
 
+/// List the open PR branches that should be pushed during `stck push`.
 pub fn build_push_branches(stack: &[PullRequest]) -> Vec<String> {
     stack
         .iter()
@@ -154,6 +193,7 @@ pub fn build_push_branches(stack: &[PullRequest]) -> Vec<String> {
         .collect()
 }
 
+/// Convert the sync plan for a stack into the PR retarget operations needed after push.
 pub fn build_push_retargets(stack: &[PullRequest], default_branch: &str) -> Vec<RetargetStep> {
     build_sync_plan(stack, default_branch)
         .into_iter()
@@ -164,6 +204,10 @@ pub fn build_push_retargets(stack: &[PullRequest], default_branch: &str) -> Vec<
         .collect()
 }
 
+/// Remove retarget steps that are already satisfied by the current PR metadata.
+///
+/// Missing PRs are kept in the result so the caller can surface the mismatch
+/// instead of silently discarding it.
 pub fn filter_pending_retargets(
     retargets: Vec<RetargetStep>,
     stack: &[PullRequest],

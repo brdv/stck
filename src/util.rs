@@ -1,3 +1,6 @@
+//! Small formatting helpers shared across subprocess-backed modules.
+
+/// Append trimmed stderr output to a base error message when detail is available.
 pub fn with_stderr(base: &str, stderr: &[u8]) -> String {
     let detail = String::from_utf8_lossy(stderr).trim().to_string();
     if detail.is_empty() {
