@@ -111,6 +111,10 @@ pub fn run() -> ExitCode {
                 }
             }
             for line in &mut report.lines {
+                if line.state == github::PrState::Merged {
+                    continue;
+                }
+
                 let needs_push = match gitops::branch_needs_push(&line.branch) {
                     Ok(needs_push) => needs_push,
                     Err(message) => {
