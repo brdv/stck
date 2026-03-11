@@ -87,6 +87,31 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     }
 }
 
+pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName,baseRefName,state,mergedAt",
+        ])
+        .output()
+        .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
+
+    if !output.status.success() {
+        return Err(with_stderr(
+            "failed to list open pull requests from GitHub",
+            &output.stderr,
+        ));
+    }
+
+    parse_pull_requests_json(&output.stdout)
+}
+
 fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([
