@@ -1,79 +1,80 @@
 # AGENTS.md
 
-## Project Overview
+## Overview
 
-- `stck` is a Rust CLI for stacked GitHub PR workflows.
-- Keep all changes local to this repository.
-- Prefer minimal, targeted diffs; avoid drive-by refactors and unrelated cleanup.
-- If requirements are ambiguous (e.g., CLI UX/output, defaults, error messages, flag naming/behavior), ask the user before making changes.
+`stck` is a Rust CLI that automates stacked GitHub PR workflows — creating branches, rebasing stacks, pushing with `--force-with-lease`, and updating PR base targets. Stays close to native `git`/`gh` behavior.
 
-## Compatibility & Stability
+## Commands
 
-- Maintain backwards compatibility for the public CLI interface unless the user explicitly requests a breaking change.
-- Keep CLI behavior predictable:
-  - Stable output where possible (especially for machine-readable/greppable output).
-  - Write errors to stderr and use meaningful exit codes.
-- Target platforms: do not introduce platform-specific behavior unless required and justified.
+```bash
+cargo fmt --all                                          # format
+cargo clippy --all-targets --all-features -- -D warnings # lint
+cargo test --all-features                                # test all
+cargo test <test_name>                                   # run single test
+cargo build --all-features                               # build
+cargo run -- <command>                                   # run locally (always prefer over global install)
+```
 
-## Tooling
+## Architecture
 
-- Language: Rust.
-- Build, lint, format, and test using standard Cargo tooling.
-- When dogfooding `stck` during development, prefer `cargo run -- <command>` over a globally installed binary.
-- Use direct `git`/`gh` commands only when `stck` cannot perform the needed step yet; briefly document why.
-- Prefer Rust standard library and existing project code over adding dependencies.
-- If a dependency is not clearly necessary, implement functionality directly.
-- If adding a dependency is justified, keep it small, well-maintained, and scoped to the need.
+All source lives in `src/` across 7 modules:
 
-## Standard Commands
+- **main.rs** — entry point; delegates to `cli::run()`
+- **cli.rs** — `clap` derive parsing and command dispatch (`new`, `submit`, `status`, `sync`, `push`)
+- **github.rs** — GitHub integration via `gh` subprocess; discovers linear PR stacks, creates/updates PRs
+- **gitops.rs** — low-level git operations (fetch, rebase, push, ref resolution) via `git` subprocess
+- **stack.rs** — stack data model; builds linear stack graphs from PR metadata; status reporting
+- **env.rs** — preflight validation (git, gh, auth, clean working tree)
+- **sync_state.rs** — persists operation state as JSON to `.git/stck/` for `--continue`/`--reset` resumable workflows
 
-- Format: `cargo fmt --all`
-- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
-- Test: `cargo test --all-features`
-- Build: `cargo build --all-features`
-- Release build: `cargo build --release --all-features`
+### Key design decisions
 
-## Testing Expectations
+- Subprocess calls to `git` and `gh` — no library bindings, keeps deps minimal
+- Linear stack assumption — fails fast on non-linear PR graphs
+- State persisted to `.git/stck/` for resumable `sync`/`push`
+- Always `git push --force-with-lease`, never bare `--force`
+- Errors to stderr with meaningful exit codes; output is grep-friendly
 
-- This project is critical to developer workflows; test coverage quality is a priority.
+### Dependencies
+
+Minimal by design: `clap`, `serde`, `serde_json`.
+Dev: `assert_cmd`, `predicates`, `tempfile`.
+
+## Safety
+
+| Forbidden                                           | Do instead                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------ |
+| Destructive git commands (`git reset --hard`, etc.) | Use safe alternatives (`git rebase`, `git stash`) or ask user for input. |
+| Read/add/edit/delete files outside this repo        | Keep all changes local to the repository                                 |
+| Create branches, commit, push, or open PRs          | Leave all git/PR operations to the user, unless explicitly asked         |
+| Introduce runtime network requirements              | Keep network access read-only and optional                               |
+
+## Coding Standards
+
+- Prefer Rust stdlib and existing project code over new dependencies.
+- If a dependency is justified, keep it small, well-maintained, and scoped to the need.
+- Prefer minimal, targeted diffs — avoid drive-by refactors and unrelated cleanup.
+- Maintain backwards compatibility for the public CLI interface unless explicitly asked to break it.
+- Keep CLI output stable and grep-friendly; write errors to stderr with meaningful exit codes.
+- If requirements are ambiguous (CLI UX, output format, defaults, flag naming), ask the user before guessing.
+
+## Testing
+
 - Add or update tests for every functional behavior change.
-- Prefer:
-  - Unit tests for parsing/logic.
-  - Integration tests for CLI behavior (flags, output, exit codes).
+- Unit tests for parsing and logic; integration tests for CLI behavior (flags, output, exit codes).
+- For `sync`/`push` changes: cover both fresh-run and stateful resume/reset paths.
 - Avoid flaky tests (timing-sensitive, network-dependent, environment-specific).
-- Run relevant Cargo tests when changes are applicable and testable.
-- For `sync`/`push` behavior changes, include coverage for fresh-run paths and stateful resume/reset paths when applicable.
+- Run relevant tests when changes are applicable and testable.
 
-## Safety Rules
+## Git Workflow
 
-- Never run destructive Git commands (for example `git reset --hard`).
-- Never read, add, edit, or delete files outside this repository.
-- Network access is limited to read-only operations (fetching public docs or references) when needed.
-  - Do not introduce runtime network requirements unless explicitly requested.
+- Before rebasing onto main: `git fetch`, then `git rebase origin/main`.
+- For PR descriptions, use `./github/pull_request_template.md`.
+- For stacked PRs, keep parent/child base relationships explicit in summaries and descriptions.
 
-## Git/PR Policy
+## Collaboration
 
-- The agent does local working-tree changes only.
-- The agent must not create branches, commit, push, or open/manage PRs.
-- All branch/commit/PR operations are performed manually by the user.
-- When asked for PR descriptions, use `./github/pull_request_template.md`
-- For stacked PR work, keep parent/child base relationships explicit in summaries and PR descriptions.
-
-## Planning & Scope
-
-- Keep review findings traceable: each finding should map to an active roadmap item or an explicit deferred item.
-- Prioritize correctness/reliability work before output/UX polish unless the user explicitly reprioritizes.
-- Preserve stable grep-friendly summary output unless output changes are explicitly scoped and documented.
-
-## Git Workflow Conventions
-
-- Before rebasing onto main, run `git fetch`, then rebase current branch onto `origin/main` (`git rebase origin/main`).
-
-## Collaboration Style
-
-- Use balanced communication: short progress updates with concise rationale.
-- Keep explanations pragmatic and action-oriented.
-- When making a non-trivial change, summarize:
-  - what changed,
-  - why it changed,
-  - how it was tested.
+- Use short progress updates with concise rationale.
+- When making a non-trivial change, summarize: what changed, why, and how it was tested.
+- Prioritize correctness and reliability before output/UX polish unless explicitly reprioritized.
+- Keep review findings traceable — each finding maps to a roadmap item or an explicit deferral.
