@@ -1406,6 +1406,47 @@ fn sync_continue_fails_when_rebase_was_aborted() {
 }
 
 #[test]
+fn sync_plain_retry_requires_continue_or_reset_after_failure() {
+    let (temp, mut first) = stck_cmd_with_stubbed_tools();
+    let fail_once_path = temp.path().join("fail-once-plain-retry.marker");
+
+    first.env(
+        "STCK_TEST_REBASE_FAIL_ONCE_FILE",
+        fail_once_path.as_os_str(),
+    );
+    first.arg("sync");
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-branch; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`",
+    ));
+
+    let state_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-plan.json");
+    assert!(
+        state_path.exists(),
+        "sync state should persist after failure"
+    );
+
+    let mut retry = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    retry.env("PATH", full_path);
+    retry.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    retry.arg("sync");
+
+    retry.assert().code(1).stderr(predicate::str::contains(
+        "error: sync stopped at failed step for feature-branch; run `stck sync --continue` after completing the rebase, or `stck sync --reset` to discard saved state and recompute",
+    ));
+
+    assert!(
+        state_path.exists(),
+        "sync state should remain available for continue or reset"
+    );
+}
+
+#[test]
 fn status_discovers_linear_stack_in_order() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.arg("status");

@@ -549,10 +549,12 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 state.completed_steps = failed_step + 1;
             }
         } else {
-            // For plain sync retries, keep legacy behavior and continue from next step.
-            if state.completed_steps <= failed_step {
-                state.completed_steps = failed_step + 1;
-            }
+            let step = &state.steps[failed_step];
+            eprintln!(
+                "error: sync stopped at failed step for {}; run `stck sync --continue` after completing the rebase, or `stck sync --reset` to discard saved state and recompute",
+                step.branch
+            );
+            return ExitCode::from(1);
         }
         state.failed_step = None;
         state.failed_step_branch_head = None;
