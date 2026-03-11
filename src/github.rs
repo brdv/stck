@@ -224,7 +224,10 @@ pub fn build_linear_stack(
     loop {
         let mut children: Vec<&PullRequest> = prs
             .iter()
-            .filter(|candidate| candidate.base_ref_name == cursor.head_ref_name)
+            .filter(|candidate| {
+                candidate.base_ref_name == cursor.head_ref_name
+                    && candidate.state != PrState::Closed
+            })
             .collect();
 
         children.sort_by(|a, b| a.head_ref_name.cmp(&b.head_ref_name));
@@ -348,6 +351,49 @@ mod tests {
             build_linear_stack(&prs, "feature-a", "main").expect_err("cycle should be detected");
 
         assert_eq!(error, "cycle detected in stack at branch feature-a");
+    }
+
+    #[test]
+    fn excludes_closed_prs_from_child_discovery() {
+        let prs = vec![
+            pr(100, "feature-base", "main"),
+            pr(101, "feature-mid", "feature-base"),
+            PullRequest {
+                number: 102,
+                head_ref_name: "feature-abandoned".to_string(),
+                base_ref_name: "feature-mid".to_string(),
+                state: PrState::Closed,
+            },
+            pr(103, "feature-top", "feature-mid"),
+        ];
+
+        let stack = build_linear_stack(&prs, "feature-mid", "main").expect("stack should build");
+        let heads = stack
+            .iter()
+            .map(|item| item.head_ref_name.as_str())
+            .collect::<Vec<_>>();
+
+        // feature-abandoned (Closed) should be excluded; feature-top is the only child
+        assert_eq!(heads, vec!["feature-base", "feature-mid", "feature-top"]);
+    }
+
+    #[test]
+    fn closed_pr_does_not_cause_non_linear_error() {
+        // Two children of feature-mid, but one is Closed — should not trigger non-linear error
+        let prs = vec![
+            pr(100, "feature-base", "main"),
+            pr(101, "feature-mid", "feature-base"),
+            PullRequest {
+                number: 102,
+                head_ref_name: "feature-abandoned".to_string(),
+                base_ref_name: "feature-mid".to_string(),
+                state: PrState::Closed,
+            },
+            pr(103, "feature-child-a", "feature-mid"),
+        ];
+
+        let stack = build_linear_stack(&prs, "feature-mid", "main").expect("stack should build");
+        assert_eq!(stack.last().unwrap().head_ref_name, "feature-child-a");
     }
 
     #[test]
