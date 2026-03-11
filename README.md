@@ -8,7 +8,7 @@ Stacked PRs improve review quality and throughput, but day-to-day maintenance ca
 
 ## Status
 
-First public release (`v0.1.0`).
+Early public release series (`v0.1.x`).
 
 ## Basic Usage
 
@@ -23,6 +23,8 @@ stck push
 ```
 
 `stck new <branch>` works both when starting from the default branch and when stacking on top of an existing branch.
+
+`stck submit` auto-detects the most likely stack parent when `--base` is omitted. If discovery succeeds but finds no parent PR, it falls back to the repository default branch. In larger repositories, discovery currently inspects up to the first 100 open PRs, so `--base <branch>` remains the reliable escape hatch.
 
 Git subcommand entrypoint is also installed (when installed via homebrew):
 
@@ -53,6 +55,8 @@ git stck --help
 cargo build --release --all-features
 ./target/release/stck --help
 ```
+
+Source builds currently target Rust `1.74` or newer.
 
 Homebrew release details are documented in [`docs/release-homebrew.md`](./docs/release-homebrew.md).
 
