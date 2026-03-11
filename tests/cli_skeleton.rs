@@ -1624,7 +1624,10 @@ fn push_blocked_while_sync_state_exists() {
         .join("git-dir")
         .join("stck")
         .join("last-plan.json");
-    assert!(state_path.exists(), "sync state should persist after failure");
+    assert!(
+        state_path.exists(),
+        "sync state should persist after failure"
+    );
 
     let mut push = stck_cmd();
     let path = std::env::var("PATH").expect("PATH should be set");
@@ -1655,7 +1658,10 @@ fn sync_blocked_while_push_state_exists() {
         .join("git-dir")
         .join("stck")
         .join("last-plan.json");
-    assert!(state_path.exists(), "push state should persist after failure");
+    assert!(
+        state_path.exists(),
+        "push state should persist after failure"
+    );
 
     let mut sync = stck_cmd();
     let path = std::env::var("PATH").expect("PATH should be set");
