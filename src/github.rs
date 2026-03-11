@@ -1,10 +1,7 @@
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::process::Command;
 
 use crate::util::with_stderr;
-
-const PR_LIST_LIMIT: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -38,8 +35,69 @@ pub fn discover_linear_stack(
     current_branch: &str,
     default_branch: &str,
 ) -> Result<Vec<PullRequest>, String> {
-    let prs = list_pull_requests()?;
-    build_linear_stack(&prs, current_branch, default_branch)
+    let current = fetch_pr_for_branch(current_branch)?;
+
+    let mut seen = vec![current.head_ref_name.clone()];
+    let mut to_current = vec![current.clone()];
+    let mut cursor_base = current.base_ref_name.clone();
+
+    // Walk up to root (default branch)
+    while cursor_base != default_branch {
+        let parent = fetch_pr_for_branch(&cursor_base)?;
+        if seen.iter().any(|b| b == &parent.head_ref_name) {
+            return Err(format!(
+                "cycle detected in stack at branch {}",
+                parent.head_ref_name
+            ));
+        }
+        seen.push(parent.head_ref_name.clone());
+        cursor_base = parent.base_ref_name.clone();
+        to_current.push(parent);
+    }
+
+    // Walk down from current to tip
+    let mut cursor_head = current.head_ref_name.clone();
+    let mut below_current: Vec<PullRequest> = Vec::new();
+    loop {
+        let children = fetch_children_for_base(&cursor_head)?;
+        let mut eligible: Vec<PullRequest> = children
+            .into_iter()
+            .filter(|pr| pr.state != PrState::Closed)
+            .collect();
+        eligible.sort_by(|a, b| a.head_ref_name.cmp(&b.head_ref_name));
+
+        match eligible.len() {
+            0 => break,
+            1 => {
+                let child = eligible.into_iter().next().unwrap();
+                if seen.iter().any(|b| b == &child.head_ref_name) {
+                    return Err(format!(
+                        "cycle detected in stack at branch {}",
+                        child.head_ref_name
+                    ));
+                }
+                seen.push(child.head_ref_name.clone());
+                cursor_head = child.head_ref_name.clone();
+                below_current.push(child);
+            }
+            _ => {
+                let candidates = eligible
+                    .iter()
+                    .map(|c| c.head_ref_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!(
+                    "non-linear stack detected at {}; child candidates: {}",
+                    cursor_head, candidates
+                ));
+            }
+        }
+    }
+
+    to_current.reverse();
+    let mut stack = to_current;
+    stack.extend(below_current);
+    Ok(stack)
 }
 
 pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
@@ -130,15 +188,48 @@ pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
     parse_pull_requests_json(&output.stdout)
 }
 
-fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
+fn fetch_pr_for_branch(branch: &str) -> Result<PullRequest, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            branch,
+            "--json",
+            "number,headRefName,baseRefName,state",
+        ])
+        .output()
+        .map_err(|_| "failed to run `gh pr view`; ensure GitHub CLI is installed".to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+        if stderr.contains("no pull requests found")
+            || stderr.contains("could not resolve to a pull request")
+        {
+            return Err(format!(
+                "no PR found for branch {branch}; create a PR first"
+            ));
+        }
+        return Err(with_stderr(
+            &format!("failed to fetch PR for branch {branch}"),
+            &output.stderr,
+        ));
+    }
+
+    serde_json::from_slice::<PullRequest>(&output.stdout)
+        .map_err(|_| format!("failed to parse PR metadata for branch {branch}"))
+}
+
+fn fetch_children_for_base(branch: &str) -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([
             "pr",
             "list",
+            "--base",
+            branch,
             "--state",
             "all",
             "--limit",
-            "1000",
+            "100",
             "--json",
             "number,headRefName,baseRefName,state",
         ])
@@ -147,13 +238,12 @@ fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
 
     if !output.status.success() {
         return Err(with_stderr(
-            "failed to list pull requests from GitHub; ensure `gh auth status` succeeds and the repository is accessible",
+            &format!("failed to list PRs with base {branch}"),
             &output.stderr,
         ));
     }
 
-    let prs = parse_pull_requests_json(&output.stdout)?;
-    enforce_pr_list_limit(prs)
+    parse_pull_requests_json(&output.stdout)
 }
 
 fn parse_pull_requests_json(bytes: &[u8]) -> Result<Vec<PullRequest>, String> {
@@ -161,20 +251,13 @@ fn parse_pull_requests_json(bytes: &[u8]) -> Result<Vec<PullRequest>, String> {
         .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())
 }
 
-fn enforce_pr_list_limit(prs: Vec<PullRequest>) -> Result<Vec<PullRequest>, String> {
-    if prs.len() == PR_LIST_LIMIT {
-        return Err(format!(
-            "pull request discovery hit limit ({PR_LIST_LIMIT}); rerun after reducing PR scope or extend pagination support"
-        ));
-    }
-    Ok(prs)
-}
-
+#[cfg(test)]
 pub fn build_linear_stack(
     prs: &[PullRequest],
     current_branch: &str,
     default_branch: &str,
 ) -> Result<Vec<PullRequest>, String> {
+    use std::collections::HashMap;
     let by_head: HashMap<&str, &PullRequest> = prs
         .iter()
         .map(|pr| (pr.head_ref_name.as_str(), pr))
@@ -261,7 +344,7 @@ pub fn build_linear_stack(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_linear_stack, enforce_pr_list_limit, PrState, PullRequest, PR_LIST_LIMIT};
+    use super::{build_linear_stack, PrState, PullRequest};
 
     fn pr(number: u64, head: &str, base: &str) -> PullRequest {
         PullRequest {
@@ -454,23 +537,5 @@ mod tests {
 
         let parsed = serde_json::from_str::<Vec<PullRequest>>(raw);
         assert!(parsed.is_err(), "malformed list JSON should fail parse");
-    }
-
-    #[test]
-    fn errors_when_pull_request_list_hits_limit() {
-        let prs = (0..PR_LIST_LIMIT)
-            .map(|i| PullRequest {
-                number: i as u64,
-                head_ref_name: format!("feature-{i}"),
-                base_ref_name: "main".to_string(),
-                state: PrState::Open,
-            })
-            .collect::<Vec<_>>();
-
-        let error = enforce_pr_list_limit(prs).expect_err("limit should trigger error");
-        assert_eq!(
-            error,
-            "pull request discovery hit limit (1000); rerun after reducing PR scope or extend pagination support"
-        );
     }
 }
