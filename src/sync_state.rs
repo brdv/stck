@@ -143,3 +143,162 @@ fn save_raw_state(state: LastPlanState) -> Result<(), String> {
         .map_err(|_| "failed to serialize operation state".to_string())?;
     fs::write(&path, raw).map_err(|_| format!("failed to write state at {}", path.display()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stack::{RetargetStep, SyncStep};
+
+    #[test]
+    fn sync_state_round_trip() {
+        let state = SyncState {
+            steps: vec![
+                SyncStep {
+                    branch: "feature-b".to_string(),
+                    old_base_ref: "feature-a".to_string(),
+                    new_base_ref: "main".to_string(),
+                },
+                SyncStep {
+                    branch: "feature-c".to_string(),
+                    old_base_ref: "feature-b".to_string(),
+                    new_base_ref: "feature-b".to_string(),
+                },
+            ],
+            completed_steps: 1,
+            failed_step: Some(1),
+            failed_step_branch_head: Some("abcd1234".to_string()),
+        };
+
+        let wrapped = LastPlanState::Sync(state.clone());
+        let json = serde_json::to_vec_pretty(&wrapped).expect("serialize should succeed");
+        let restored: LastPlanState =
+            serde_json::from_slice(&json).expect("deserialize should succeed");
+
+        match restored {
+            LastPlanState::Sync(s) => {
+                assert_eq!(s.steps.len(), 2);
+                assert_eq!(s.steps[0].branch, "feature-b");
+                assert_eq!(s.steps[1].new_base_ref, "feature-b");
+                assert_eq!(s.completed_steps, 1);
+                assert_eq!(s.failed_step, Some(1));
+                assert_eq!(s.failed_step_branch_head, Some("abcd1234".to_string()));
+            }
+            LastPlanState::Push(_) => panic!("expected Sync variant"),
+        }
+    }
+
+    #[test]
+    fn push_state_round_trip() {
+        let state = PushState {
+            push_branches: vec!["feature-b".to_string(), "feature-c".to_string()],
+            completed_pushes: 1,
+            retargets: vec![RetargetStep {
+                branch: "feature-b".to_string(),
+                new_base_ref: "main".to_string(),
+            }],
+            completed_retargets: 0,
+        };
+
+        let wrapped = LastPlanState::Push(state.clone());
+        let json = serde_json::to_vec_pretty(&wrapped).expect("serialize should succeed");
+        let restored: LastPlanState =
+            serde_json::from_slice(&json).expect("deserialize should succeed");
+
+        match restored {
+            LastPlanState::Push(p) => {
+                assert_eq!(p.push_branches, vec!["feature-b", "feature-c"]);
+                assert_eq!(p.completed_pushes, 1);
+                assert_eq!(p.retargets.len(), 1);
+                assert_eq!(p.retargets[0].branch, "feature-b");
+                assert_eq!(p.completed_retargets, 0);
+            }
+            LastPlanState::Sync(_) => panic!("expected Push variant"),
+        }
+    }
+
+    #[test]
+    fn last_sync_plan_round_trip() {
+        let plan = LastSyncPlan {
+            default_branch: "main".to_string(),
+            retargets: vec![
+                RetargetStep {
+                    branch: "feature-b".to_string(),
+                    new_base_ref: "main".to_string(),
+                },
+                RetargetStep {
+                    branch: "feature-c".to_string(),
+                    new_base_ref: "feature-b".to_string(),
+                },
+            ],
+        };
+
+        let json = serde_json::to_vec_pretty(&plan).expect("serialize should succeed");
+        let restored: LastSyncPlan =
+            serde_json::from_slice(&json).expect("deserialize should succeed");
+
+        assert_eq!(restored.default_branch, "main");
+        assert_eq!(restored.retargets.len(), 2);
+        assert_eq!(restored.retargets[0].branch, "feature-b");
+        assert_eq!(restored.retargets[1].new_base_ref, "feature-b");
+    }
+
+    #[test]
+    fn kind_tag_distinguishes_sync_from_push() {
+        let sync = LastPlanState::Sync(SyncState {
+            steps: vec![],
+            completed_steps: 0,
+            failed_step: None,
+            failed_step_branch_head: None,
+        });
+        let push = LastPlanState::Push(PushState {
+            push_branches: vec![],
+            completed_pushes: 0,
+            retargets: vec![],
+            completed_retargets: 0,
+        });
+
+        let sync_json = serde_json::to_string(&sync).expect("serialize sync");
+        let push_json = serde_json::to_string(&push).expect("serialize push");
+
+        assert!(sync_json.contains(r#""kind":"sync""#));
+        assert!(push_json.contains(r#""kind":"push""#));
+
+        // Deserializing sync JSON yields Sync variant
+        let restored_sync: LastPlanState =
+            serde_json::from_str(&sync_json).expect("deserialize sync");
+        assert!(matches!(restored_sync, LastPlanState::Sync(_)));
+
+        // Deserializing push JSON yields Push variant
+        let restored_push: LastPlanState =
+            serde_json::from_str(&push_json).expect("deserialize push");
+        assert!(matches!(restored_push, LastPlanState::Push(_)));
+    }
+
+    #[test]
+    fn sync_state_with_no_failed_step_round_trips() {
+        let state = SyncState {
+            steps: vec![SyncStep {
+                branch: "feature-b".to_string(),
+                old_base_ref: "feature-a".to_string(),
+                new_base_ref: "main".to_string(),
+            }],
+            completed_steps: 1,
+            failed_step: None,
+            failed_step_branch_head: None,
+        };
+
+        let wrapped = LastPlanState::Sync(state);
+        let json = serde_json::to_vec_pretty(&wrapped).expect("serialize should succeed");
+        let restored: LastPlanState =
+            serde_json::from_slice(&json).expect("deserialize should succeed");
+
+        match restored {
+            LastPlanState::Sync(s) => {
+                assert_eq!(s.completed_steps, 1);
+                assert_eq!(s.failed_step, None);
+                assert_eq!(s.failed_step_branch_head, None);
+            }
+            LastPlanState::Push(_) => panic!("expected Sync variant"),
+        }
+    }
+}

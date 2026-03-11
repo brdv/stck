@@ -36,20 +36,56 @@ pub fn resolve_ref(reference: &str) -> Result<String, String> {
     rev_parse(reference)
 }
 
-pub fn resolve_old_base_for_rebase(base_branch: &str) -> Result<String, String> {
+pub fn resolve_old_base_for_rebase(base_branch: &str, branch: &str) -> Result<String, String> {
+    // Try merge-base between the branch and the old base ref to find the true
+    // fork point. This handles squash-merge and rewritten-ancestry scenarios
+    // where the base branch tip may have moved past the actual divergence point.
+    let base_ref = resolve_base_ref(base_branch)?;
+    let branch_ref = format!("refs/heads/{branch}");
+    if let Ok(fork) = merge_base(&base_ref, &branch_ref) {
+        return Ok(fork);
+    }
+
+    // Fall back to resolving the base branch ref directly.
+    rev_parse(&base_ref)
+}
+
+fn resolve_base_ref(base_branch: &str) -> Result<String, String> {
     let local_ref = format!("refs/heads/{base_branch}");
-    if let Ok(sha) = rev_parse(&local_ref) {
-        return Ok(sha);
+    if ref_exists(&local_ref)? {
+        return Ok(local_ref);
     }
 
     let remote_ref = format!("refs/remotes/origin/{base_branch}");
-    if let Ok(sha) = rev_parse(&remote_ref) {
-        return Ok(sha);
+    if ref_exists(&remote_ref)? {
+        return Ok(remote_ref);
     }
 
     Err(format!(
         "could not resolve old base branch `{base_branch}` locally or on origin; fetch and/or restore the branch, then rerun `stck sync`"
     ))
+}
+
+fn merge_base(ref_a: &str, ref_b: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(["merge-base", ref_a, ref_b])
+        .output()
+        .map_err(|_| "failed to run `git merge-base`".to_string())?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "could not find merge-base between `{ref_a}` and `{ref_b}`"
+        ));
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        Err(format!(
+            "merge-base between `{ref_a}` and `{ref_b}` resolved to empty SHA"
+        ))
+    } else {
+        Ok(sha)
+    }
 }
 
 pub fn git_dir() -> Result<PathBuf, String> {
@@ -73,6 +109,21 @@ pub fn git_dir() -> Result<PathBuf, String> {
     } else {
         let cwd = env::current_dir().map_err(|_| "failed to read current directory".to_string())?;
         Ok(cwd.join(path))
+    }
+}
+
+pub fn is_ancestor(ancestor_ref: &str, descendant_ref: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor_ref, descendant_ref])
+        .output()
+        .map_err(|_| "failed to run `git merge-base --is-ancestor`".to_string())?;
+
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "failed to check ancestry between `{ancestor_ref}` and `{descendant_ref}`"
+        )),
     }
 }
 

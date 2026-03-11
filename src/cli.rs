@@ -213,12 +213,19 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
         };
 
         if !current_has_pr {
+            let bootstrap_base =
+                match discover_parent_base(current_branch, &preflight.default_branch) {
+                    Ok(base) => base,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
             println!(
                 "$ gh pr create --base {} --head {} --title {} --body \"\"",
-                preflight.default_branch, current_branch, current_branch
+                bootstrap_base, current_branch, current_branch
             );
-            if let Err(message) =
-                github::create_pr(&preflight.default_branch, current_branch, current_branch)
+            if let Err(message) = github::create_pr(&bootstrap_base, current_branch, current_branch)
             {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
@@ -269,6 +276,43 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Discover the correct PR base for a bootstrap PR by finding the nearest
+/// ancestor branch that has an open PR. Falls back to `default_branch`.
+fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, String> {
+    // Find all open PRs whose head branch is a git ancestor of `branch`.
+    // The closest ancestor (by commit distance) wins.
+    let prs = match github::list_open_prs() {
+        Ok(prs) => prs,
+        Err(_) => return Ok(default_branch.to_string()),
+    };
+
+    let branch_ref = format!("refs/heads/{branch}");
+    let mut best: Option<&str> = None;
+
+    for pr in &prs {
+        if pr.head_ref_name == branch || pr.head_ref_name == default_branch {
+            continue;
+        }
+        if pr.state != github::PrState::Open {
+            continue;
+        }
+        let candidate_ref = format!("refs/heads/{}", pr.head_ref_name);
+        if gitops::is_ancestor(&candidate_ref, &branch_ref).unwrap_or(false) {
+            // If we already have a candidate, pick the one that is a descendant of the other
+            if let Some(current_best) = best {
+                let current_best_ref = format!("refs/heads/{current_best}");
+                if gitops::is_ancestor(&current_best_ref, &candidate_ref).unwrap_or(false) {
+                    best = Some(&pr.head_ref_name);
+                }
+            } else {
+                best = Some(&pr.head_ref_name);
+            }
+        }
+    }
+
+    Ok(best.unwrap_or(default_branch).to_string())
+}
+
 fn run_submit(preflight: &env::PreflightContext, base_override: Option<&str>) -> ExitCode {
     let current_branch = &preflight.current_branch;
     if current_branch == &preflight.default_branch {
@@ -306,13 +350,30 @@ fn run_submit(preflight: &env::PreflightContext, base_override: Option<&str>) ->
         return ExitCode::SUCCESS;
     }
 
-    let base = base_override.unwrap_or(&preflight.default_branch);
-    if base_override.is_none() {
-        println!(
-            "No --base provided. Defaulting PR base to {}.",
-            preflight.default_branch
-        );
-    }
+    let discovered_base;
+    let base = if let Some(explicit) = base_override {
+        explicit
+    } else {
+        discovered_base = match discover_parent_base(current_branch, &preflight.default_branch) {
+            Ok(base) => base,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+        if discovered_base == preflight.default_branch {
+            println!(
+                "No --base provided. Defaulting PR base to {}.",
+                preflight.default_branch
+            );
+        } else {
+            println!(
+                "No --base provided. Detected stack parent: {}.",
+                discovered_base
+            );
+        }
+        &discovered_base
+    };
 
     println!(
         "$ gh pr create --base {} --head {} --title {} --body \"\"",
@@ -484,13 +545,14 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
         };
-        let old_base_sha = match gitops::resolve_old_base_for_rebase(&step.old_base_ref) {
-            Ok(sha) => sha,
-            Err(message) => {
-                eprintln!("error: {message}");
-                return ExitCode::from(1);
-            }
-        };
+        let old_base_sha =
+            match gitops::resolve_old_base_for_rebase(&step.old_base_ref, &step.branch) {
+                Ok(sha) => sha,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
 
         println!(
             "$ git rebase --onto {} {} {}",
