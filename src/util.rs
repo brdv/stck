@@ -18,7 +18,10 @@ mod tests {
 
     #[test]
     fn returns_base_when_stderr_is_whitespace_only() {
-        assert_eq!(with_stderr("something failed", b"  \n  "), "something failed");
+        assert_eq!(
+            with_stderr("something failed", b"  \n  "),
+            "something failed"
+        );
     }
 
     #[test]
