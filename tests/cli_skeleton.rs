@@ -315,6 +315,16 @@ if [[ "${1:-}" == "checkout" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "check-ref-format" ]]; then
+  shift
+  while [[ "${1:-}" == --* ]]; do shift; done
+  name="${1:-}"
+  if [[ "${name}" == *" "* || "${name}" == *".."* || "${name}" == *"~"* || "${name}" == *"^"* || "${name}" == *":"* || "${name}" == *"\\"* ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 exit 0
 "#,
     );
@@ -843,6 +853,16 @@ fn new_fails_when_new_branch_exists_on_origin() {
         log.is_empty(),
         "new should fail before running side-effecting commands"
     );
+}
+
+#[test]
+fn new_rejects_invalid_branch_name() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.args(["new", "feature branch"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: `feature branch` is not a valid branch name",
+    ));
 }
 
 #[test]
@@ -1396,16 +1416,16 @@ fn status_discovers_linear_stack_in_order() {
             "Stack: main <- feature-base <- feature-branch <- feature-child",
         ))
         .stdout(predicate::str::contains(
-            "feature-base PR #100 [MERGED] base=main head=feature-base flags=none",
+            "feature-base PR #100 MERGED base=main",
         ))
         .stdout(predicate::str::contains(
-            "feature-branch PR #101 [OPEN] base=feature-base head=feature-branch flags=needs_sync",
+            "* feature-branch PR #101 OPEN base=feature-base [needs_sync]",
         ))
         .stdout(predicate::str::contains(
-            "feature-child PR #102 [OPEN] base=feature-branch head=feature-child flags=none",
+            "feature-child PR #102 OPEN base=feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "Summary: needs_sync=1 needs_push=0 base_mismatch=0",
+            "Summary: 1 needs_sync, 0 needs_push, 0 base_mismatch",
         ));
 }
 
@@ -1484,10 +1504,10 @@ fn status_reports_needs_push_when_branch_diverges_from_origin() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "feature-child PR #102 [OPEN] base=feature-branch head=feature-child flags=needs_push",
+            "feature-child PR #102 OPEN base=feature-branch [needs_push]",
         ))
         .stdout(predicate::str::contains(
-            "Summary: needs_sync=1 needs_push=1 base_mismatch=0",
+            "Summary: 1 needs_sync, 1 needs_push, 0 base_mismatch",
         ));
 }
 
@@ -1501,11 +1521,22 @@ fn status_reports_needs_sync_when_default_branch_has_advanced() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "feature-base PR #100 [OPEN] base=main head=feature-base flags=needs_sync",
+            "feature-base PR #100 OPEN base=main [needs_sync]",
         ))
         .stdout(predicate::str::contains(
-            "Summary: needs_sync=1 needs_push=0 base_mismatch=0",
+            "Summary: 1 needs_sync, 0 needs_push, 0 base_mismatch",
         ));
+}
+
+#[test]
+fn status_from_default_branch_shows_helpful_message() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_CURRENT_BRANCH", "main");
+    cmd.arg("status");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "On default branch (main). Run `stck new <branch>` to start a new stack.",
+    ));
 }
 
 #[test]

@@ -303,6 +303,19 @@ fn rev_parse(reference: &str) -> Result<String, String> {
     }
 }
 
+pub fn is_valid_branch_name(name: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args(["check-ref-format", "--allow-onelevel", name])
+        .output()
+        .map_err(|_| "failed to run `git check-ref-format`".to_string())?;
+
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(_) => Ok(false),
+        None => Err("failed to validate branch name".to_string()),
+    }
+}
+
 fn ref_exists(reference: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args(["show-ref", "--verify", "--quiet", reference])
