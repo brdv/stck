@@ -1,12 +1,12 @@
 class Stck < Formula
   desc "CLI for stacked GitHub pull request workflows"
   homepage "https://github.com/brdv/stck"
-  version "0.1.2"
+  version "0.1.3"
   depends_on arch: :arm64
 
   url "https://github.com/brdv/stck/releases/download/v#{version}/stck-v#{version}-aarch64-apple-darwin.tar.gz"
   # Replace this SHA256 when publishing a new release.
-  sha256 "eefb4f23bccbbf679ee069d3d9bc8c0eeb69cc23af1746755c11d768219f42d9"
+  sha256 "ad204d12aedcff9131d349613286b509c30b4c8cf099c2e387b7e5967df5478b"
 
   def install
     bin.install "stck"
