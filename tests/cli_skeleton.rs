@@ -1610,3 +1610,61 @@ fn sync_then_push_after_squash_merge_produces_correct_retargets() {
             "$ gh pr edit feature-child --base feature-branch",
         ));
 }
+
+#[test]
+fn push_blocked_while_sync_state_exists() {
+    // Trigger a sync failure to leave sync state on disk, then run push.
+    let (temp, mut sync) = stck_cmd_with_stubbed_tools();
+    sync.env("STCK_TEST_REBASE_FAIL", "1");
+    sync.arg("sync");
+    sync.assert().code(1);
+
+    let state_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-plan.json");
+    assert!(state_path.exists(), "sync state should persist after failure");
+
+    let mut push = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    push.env("PATH", full_path);
+    push.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    push.arg("push");
+
+    push.assert().code(1).stderr(predicate::str::contains(
+        "error: sync operation state is in progress; run `stck sync --continue` before running push",
+    ));
+}
+
+#[test]
+fn sync_blocked_while_push_state_exists() {
+    // Trigger a push failure to leave push state on disk, then run sync.
+    let (temp, mut push) = stck_cmd_with_stubbed_tools();
+    push.env(
+        "STCK_TEST_NEEDS_PUSH_BRANCHES",
+        "feature-branch,feature-child",
+    );
+    push.env("STCK_TEST_PUSH_FAIL_BRANCH", "feature-child");
+    push.arg("push");
+    push.assert().code(1);
+
+    let state_path = temp
+        .path()
+        .join("git-dir")
+        .join("stck")
+        .join("last-plan.json");
+    assert!(state_path.exists(), "push state should persist after failure");
+
+    let mut sync = stck_cmd();
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let full_path = format!("{}:{}", temp.path().join("bin").display(), path);
+    sync.env("PATH", full_path);
+    sync.env("STCK_TEST_GIT_DIR", temp.path().join("git-dir").as_os_str());
+    sync.arg("sync");
+
+    sync.assert().code(1).stderr(predicate::str::contains(
+        "error: push operation state is in progress; run `stck push` before starting a new sync",
+    ));
+}
