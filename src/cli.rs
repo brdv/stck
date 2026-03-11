@@ -861,3 +861,14 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
     );
     ExitCode::SUCCESS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    #[test]
+    fn clap_definition_debug_asserts() {
+        Cli::command().debug_assert();
+    }
+}
