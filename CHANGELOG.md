@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.2] - 2026-03-11
+
+### Added
+
+- `stck new` and `stck submit` now auto-detect the stack parent branch when no `--base` is provided, instead of always defaulting to the repository default branch.
+- `PrState` enum (`Open`, `Merged`, `Closed`) replaces stringly-typed PR state throughout the codebase.
+
+### Changed
+
+- `resolve_old_base_for_rebase` now uses `git merge-base` to find the true fork point, handling squash-merge and rewritten-ancestry scenarios. Falls back to direct ref resolution.
+- Closed (non-merged) PRs are now excluded from stack child discovery, preventing false non-linear stack errors.
+- Merged PRs are no longer flagged with `needs_sync` in status output.
+- Removed `merged_at` field from `PullRequest` — `PrState` is the single source of truth for PR lifecycle state.
+
+### Fixed
+
+- Fixed `stck new` bootstrap PR targeting the default branch instead of the stack parent when run from a mid-stack branch.
+- Fixed `stck submit` defaulting to the repository default branch instead of detecting the parent branch for stacked PRs.
+
 ## [0.1.1] - 2026-02-11
 
 ### Added
