@@ -1,3 +1,5 @@
+//! CLI argument definitions and top-level command dispatch.
+
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
@@ -43,6 +45,7 @@ enum Commands {
     Push,
 }
 
+/// Parse CLI arguments, run preflight checks, and dispatch to a command handler.
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
 

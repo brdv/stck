@@ -1,3 +1,5 @@
+//! Command implementations behind the clap definitions in `cli`.
+
 use std::process::ExitCode;
 
 use crate::env;
@@ -6,6 +8,7 @@ use crate::gitops;
 use crate::stack;
 use crate::sync_state::{self, LastSyncPlan, PushState, SyncState};
 
+/// Print the detected stack, its PR state, and any local follow-up actions.
 pub(crate) fn run_status(preflight: &env::PreflightContext) -> ExitCode {
     if preflight.current_branch == preflight.default_branch {
         println!(
@@ -108,6 +111,7 @@ pub(crate) fn run_status(preflight: &env::PreflightContext) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Create the next branch in the stack and bootstrap the current branch PR when needed.
 pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
     let current_branch = &preflight.current_branch;
     let starting_from_default = current_branch == &preflight.default_branch;
@@ -244,6 +248,7 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
     ExitCode::SUCCESS
 }
 
+/// Discover the intended PR base for a branch by looking for its parent in the open stack.
 fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, String> {
     let prs = github::list_open_prs().map_err(|message| {
         format!(
@@ -277,6 +282,7 @@ fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, St
     Ok(best.unwrap_or(default_branch).to_string())
 }
 
+/// Create a pull request for the current branch if one does not already exist.
 pub(crate) fn run_submit(
     preflight: &env::PreflightContext,
     base_override: Option<&str>,
@@ -355,6 +361,10 @@ pub(crate) fn run_submit(
     ExitCode::SUCCESS
 }
 
+/// Rebase the current stacked branch and its descendants onto the correct bases.
+///
+/// This command supports resumable operation state via `sync_state`, including
+/// explicit `--continue` and `--reset` flows after a failed rebase.
 pub(crate) fn run_sync(
     preflight: &env::PreflightContext,
     continue_sync: bool,
@@ -619,6 +629,7 @@ pub(crate) fn run_sync(
     ExitCode::SUCCESS
 }
 
+/// Push rewritten stack branches and retarget any affected pull requests.
 pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
     if let Err(message) = gitops::fetch_origin() {
         eprintln!("error: {message}");

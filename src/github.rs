@@ -1,13 +1,19 @@
+//! GitHub pull request discovery and mutation helpers backed by the `gh` CLI.
+
 use serde::Deserialize;
 use std::process::Command;
 
 use crate::util::with_stderr;
 
+/// The GitHub state of a pull request as returned by `gh`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PrState {
+    /// The pull request is still open.
     Open,
+    /// The pull request has been merged.
     Merged,
+    /// The pull request is closed without being merged.
     Closed,
 }
 
@@ -21,16 +27,26 @@ impl std::fmt::Display for PrState {
     }
 }
 
+/// Minimal pull request metadata needed to reason about a linear stack.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequest {
+    /// The GitHub pull request number.
     pub number: u64,
+    /// The branch name used as the PR head.
     #[serde(rename = "headRefName")]
     pub head_ref_name: String,
+    /// The branch name currently targeted as the PR base.
     #[serde(rename = "baseRefName")]
     pub base_ref_name: String,
+    /// The current GitHub state of the PR.
     pub state: PrState,
 }
 
+/// Discover the full linear stack surrounding `current_branch`.
+///
+/// The returned list is ordered from the stack root to the highest descendant
+/// branch. The function fails if any parent PR is missing, if multiple open
+/// children exist for a branch, or if the PR graph forms a cycle.
 pub fn discover_linear_stack(
     current_branch: &str,
     default_branch: &str,
@@ -100,6 +116,7 @@ pub fn discover_linear_stack(
     Ok(stack)
 }
 
+/// Change the GitHub base branch for the PR whose head matches `branch`.
 pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
     let output = Command::new("gh")
         .args(["pr", "edit", branch, "--base", new_base])
@@ -118,6 +135,10 @@ pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
     }
 }
 
+/// Return whether a pull request already exists for `branch`.
+///
+/// "No pull request found" responses are treated as `Ok(false)`. Other `gh`
+/// failures are surfaced as actionable errors.
 pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
     let output = Command::new("gh")
         .args(["pr", "view", branch, "--json", "number"])
@@ -145,6 +166,7 @@ pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
     }
 }
 
+/// Create a pull request with the given base, head, and title.
 pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     let output = Command::new("gh")
         .args([
@@ -163,6 +185,11 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     }
 }
 
+/// List open pull requests visible to the current repository.
+///
+/// This currently relies on `gh pr list --limit 100`, so callers should treat
+/// it as a best-effort discovery source rather than a complete repository-wide
+/// index in very large repositories.
 pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
     let output = Command::new("gh")
         .args([
@@ -251,6 +278,7 @@ fn parse_pull_requests_json(bytes: &[u8]) -> Result<Vec<PullRequest>, String> {
         .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())
 }
 
+/// Test-only stack builder that mirrors `discover_linear_stack` without shelling out.
 #[cfg(test)]
 pub fn build_linear_stack(
     prs: &[PullRequest],

@@ -1,8 +1,11 @@
+//! Git subprocess helpers used by stack planning and command execution.
+
 use std::process::{Command, Stdio};
 use std::{env, path::PathBuf};
 
 use crate::util::with_stderr;
 
+/// Fetch updated refs from the `origin` remote.
 pub fn fetch_origin() -> Result<(), String> {
     let output = Command::new("git")
         .args(["fetch", "origin"])
@@ -21,6 +24,10 @@ pub fn fetch_origin() -> Result<(), String> {
     }
 }
 
+/// Return whether the local branch head differs from `origin/<branch>`.
+///
+/// Missing remote refs are treated as needing a push so newly created branches
+/// show up as actionable.
 pub fn branch_needs_push(branch: &str) -> Result<bool, String> {
     let local_ref = format!("refs/heads/{branch}");
     let remote_ref = format!("refs/remotes/origin/{branch}");
@@ -34,10 +41,16 @@ pub fn branch_needs_push(branch: &str) -> Result<bool, String> {
     Ok(local_sha != remote_sha)
 }
 
+/// Resolve a git reference to its full object SHA.
 pub fn resolve_ref(reference: &str) -> Result<String, String> {
     rev_parse(reference)
 }
 
+/// Resolve the fork point to use as the old base for `git rebase --onto`.
+///
+/// This prefers the merge-base between `branch` and `base_branch` so sync can
+/// recover from squash merges and rewritten ancestry. If no merge-base can be
+/// found, the resolved base branch ref is used as a fallback.
 pub fn resolve_old_base_for_rebase(base_branch: &str, branch: &str) -> Result<String, String> {
     // Try merge-base between the branch and the old base ref to find the true
     // fork point. This handles squash-merge and rewritten-ancestry scenarios
@@ -90,6 +103,7 @@ fn merge_base(ref_a: &str, ref_b: &str) -> Result<String, String> {
     }
 }
 
+/// Return the absolute path to the repository's `.git` directory.
 pub fn git_dir() -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-dir"])
@@ -114,6 +128,7 @@ pub fn git_dir() -> Result<PathBuf, String> {
     }
 }
 
+/// Return whether `ancestor_ref` is an ancestor of `descendant_ref`.
 pub fn is_ancestor(ancestor_ref: &str, descendant_ref: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args(["merge-base", "--is-ancestor", ancestor_ref, descendant_ref])
@@ -129,11 +144,16 @@ pub fn is_ancestor(ancestor_ref: &str, descendant_ref: &str) -> Result<bool, Str
     }
 }
 
+/// Detect whether a git rebase is currently in progress in this repository.
 pub fn rebase_in_progress() -> Result<bool, String> {
     let git_dir = git_dir()?;
     Ok(git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists())
 }
 
+/// Return whether `branch` is behind the fetched remote default branch.
+///
+/// This uses `origin/<default_branch>` and therefore expects callers to fetch
+/// before relying on the result.
 pub fn branch_needs_sync_with_default(default_branch: &str, branch: &str) -> Result<bool, String> {
     let default_ref = format!("refs/remotes/origin/{default_branch}");
     let branch_ref = format!("refs/heads/{branch}");
@@ -152,6 +172,10 @@ pub fn branch_needs_sync_with_default(default_branch: &str, branch: &str) -> Res
     }
 }
 
+/// Rebase `branch` onto `new_base`, using `old_base` as the fork point.
+///
+/// Standard git rebase progress and conflict output is inherited directly so
+/// the user can continue or abort with native git commands when needed.
 pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), String> {
     let status = Command::new("git")
         .args(["rebase", "--onto", new_base, old_base, branch])
@@ -168,6 +192,7 @@ pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), S
     }
 }
 
+/// Push `branch` to `origin` with `--force-with-lease`.
 pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
     let status = Command::new("git")
         .args(["push", "--force-with-lease", "origin", branch])
@@ -184,6 +209,7 @@ pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
     }
 }
 
+/// Return whether `branch` has an upstream tracking branch configured.
 pub fn branch_has_upstream(branch: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args([
@@ -202,14 +228,17 @@ pub fn branch_has_upstream(branch: &str) -> Result<bool, String> {
     }
 }
 
+/// Return whether a local branch named `branch` exists.
 pub fn local_branch_exists(branch: &str) -> Result<bool, String> {
     ref_exists(&format!("refs/heads/{branch}"))
 }
 
+/// Return whether `origin/<branch>` exists locally.
 pub fn remote_branch_exists(branch: &str) -> Result<bool, String> {
     ref_exists(&format!("refs/remotes/origin/{branch}"))
 }
 
+/// Push `branch` to `origin` and configure it as the upstream branch.
 pub fn push_set_upstream(branch: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["push", "-u", "origin", branch])
@@ -226,6 +255,7 @@ pub fn push_set_upstream(branch: &str) -> Result<(), String> {
     }
 }
 
+/// Create and check out a new local branch.
 pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["checkout", "-b", branch])
@@ -246,6 +276,7 @@ pub fn checkout_new_branch(branch: &str) -> Result<(), String> {
     }
 }
 
+/// Check out an existing local branch.
 pub fn checkout_branch(branch: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["checkout", branch])
@@ -262,6 +293,7 @@ pub fn checkout_branch(branch: &str) -> Result<(), String> {
     }
 }
 
+/// Return whether `head` contains commits not present on `base`.
 pub fn has_commits_between(base: &str, head: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args([
@@ -303,6 +335,7 @@ fn rev_parse(reference: &str) -> Result<String, String> {
     }
 }
 
+/// Return whether `name` is accepted by `git check-ref-format --allow-onelevel`.
 pub fn is_valid_branch_name(name: &str) -> Result<bool, String> {
     let output = Command::new("git")
         .args(["check-ref-format", "--allow-onelevel", name])
