@@ -1,7 +1,7 @@
 class Stck < Formula
   desc "CLI for stacked GitHub pull request workflows"
   homepage "https://github.com/brdv/stck"
-  version "0.1.1"
+  version "0.1.2"
   depends_on arch: :arm64
 
   url "https://github.com/brdv/stck/releases/download/v#{version}/stck-v#{version}-aarch64-apple-darwin.tar.gz"
