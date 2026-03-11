@@ -58,6 +58,15 @@ Dev: `assert_cmd`, `predicates`, `tempfile`.
 - Keep CLI output stable and grep-friendly; write errors to stderr with meaningful exit codes.
 - If requirements are ambiguous (CLI UX, output format, defaults, flag naming), ask the user before guessing.
 
+## Documentation
+
+- Follow standard Rustdoc expectations for crate, module, and public API documentation.
+- Use `//!` for crate/module docs and `///` for public structs, enums, and functions whose contracts matter.
+- Document what the item does, key invariants/assumptions, important error behavior, and usage context when that is not obvious from the type/signature.
+- Add inline `//` comments sparingly and only for non-obvious logic, workflow invariants, or recovery behavior; do not add comments that merely restate the code.
+- Prefer reducing visibility over documenting accidental public surface area.
+- Keep documentation accurate as behavior changes, and treat missing-docs lint compliance as part of done-ness.
+
 ## Testing
 
 - Add or update tests for every functional behavior change.
