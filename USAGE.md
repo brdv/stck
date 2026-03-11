@@ -72,8 +72,11 @@ stck submit --base feature-a
 
 `submit` creates a PR for the current branch when one does not exist.
 
-- If no `--base` is provided, it defaults to the repository default branch.
-- Use `--base` to target a stack parent branch explicitly.
+- If no `--base` is provided, `stck` first tries to auto-detect the stack parent from open PR metadata.
+- If discovery succeeds but finds no parent PR, `stck` falls back to the repository default branch.
+- If GitHub lookup fails, `stck` errors and tells you to retry or pass `--base <branch>` explicitly.
+- Parent auto-discovery currently inspects up to the first 100 open PRs, so `--base` is the reliable override in larger repositories.
+- Use `--base` any time you want to target a stack parent branch explicitly.
 - If the current branch already has a PR, it reports a no-op.
 
 ### 3. Sync local stack after upstream changes
@@ -128,5 +131,6 @@ stck push
 
 ## Notes
 
-- `stck` assumes a linear stack in `v0.1.0` and fails fast for non-linear graphs.
+- `stck` currently assumes a linear stack and fails fast for non-linear graphs.
+- Parent auto-discovery for `new`/`submit` currently scans up to 100 open PRs before giving up. In larger repositories, pass `--base <branch>` explicitly.
 - If a rebase conflict happens during `sync`, resolve conflicts with normal Git workflow, then continue and rerun `stck sync` as needed.

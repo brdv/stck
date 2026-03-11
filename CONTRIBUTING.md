@@ -11,6 +11,8 @@ cargo test --all-features
 cargo build --all-features
 ```
 
+The crate currently declares Rust `1.74` as its minimum supported toolchain in `Cargo.toml`.
+
 ## Scope
 
 - Keep changes minimal and focused.
