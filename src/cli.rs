@@ -724,6 +724,7 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             } else {
                 stack::build_push_retargets(&stack, &preflight.default_branch)
             };
+            let retargets = stack::filter_pending_retargets(retargets, &stack);
             let mut push_branches = Vec::new();
             for branch in stack::build_push_branches(&stack) {
                 let needs_push = match gitops::branch_needs_push(&branch) {
