@@ -4,6 +4,7 @@ mod github;
 mod gitops;
 mod stack;
 mod sync_state;
+mod util;
 
 use std::process::ExitCode;
 

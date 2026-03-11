@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
 
+use crate::util::with_stderr;
+
 const PR_LIST_LIMIT: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -166,15 +168,6 @@ fn enforce_pr_list_limit(prs: Vec<PullRequest>) -> Result<Vec<PullRequest>, Stri
         ));
     }
     Ok(prs)
-}
-
-fn with_stderr(base: &str, stderr: &[u8]) -> String {
-    let detail = String::from_utf8_lossy(stderr).trim().to_string();
-    if detail.is_empty() {
-        base.to_string()
-    } else {
-        format!("{base}; stderr: {detail}")
-    }
 }
 
 pub fn build_linear_stack(

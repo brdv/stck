@@ -1092,7 +1092,7 @@ fn sync_includes_rebase_stderr_on_failure() {
     cmd.arg("sync");
 
     cmd.assert().code(1).stderr(predicate::str::contains(
-        "stderr: CONFLICT (content): Merge conflict in src/main.rs",
+        "CONFLICT (content): Merge conflict in src/main.rs",
     ));
 }
 
