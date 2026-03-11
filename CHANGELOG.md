@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.3] - 2026-03-11
+
+### Added
+
+- Added `rust-version = "1.74"` to declare the supported Rust toolchain explicitly.
+- Added `#![forbid(unsafe_code)]` to enforce the current no-unsafe safety posture.
+- Added a dedicated `Cli::command().debug_assert()` smoke test for the clap definition.
+- Added crate, module, and public API Rustdoc coverage across the codebase, and enabled missing-docs linting.
+
+### Changed
+
+- Refactored the binary to use a `src/lib.rs` entrypoint and moved command execution logic out of `src/cli.rs`.
+- Split the integration test suite by command and moved shared test artifacts under per-test `TempDir`s.
+- Updated README and usage docs to reflect current parent auto-detection behavior and known discovery limits.
+
+### Fixed
+
+- Plain `stck sync` now refuses to implicitly continue a failed sync; users must choose `--continue` or `--reset`.
+- Parent-base auto-discovery now fails closed on GitHub lookup errors instead of silently defaulting to the repository default branch.
+- `stck status` no longer reports `needs_push` for merged PR branches.
+- Fresh `stck sync` runs now fail early when an unrelated git rebase is already in progress.
+- `stck push` now skips PR retarget operations that are already satisfied.
+- Resumed `stck push` runs now reconcile saved retarget state against current PR bases and clear stale push state when no work remains.
+
 ## [0.1.2] - 2026-03-11
 
 ### Added
