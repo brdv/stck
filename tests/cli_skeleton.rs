@@ -663,6 +663,17 @@ fn new_from_stacked_branch_discovers_parent_base() {
 }
 
 #[test]
+fn new_fails_when_parent_discovery_errors() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_PR_LIST_FAIL", "1");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: could not auto-detect stack parent for feature-branch: failed to list open pull requests from GitHub; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
+    ));
+}
+
+#[test]
 fn submit_creates_pr_with_base_override() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = std::env::temp_dir().join("stck-submit-base-override.log");
@@ -716,6 +727,17 @@ fn submit_falls_back_to_default_when_no_parent_pr() {
         .stdout(predicate::str::contains(
             "$ gh pr create --base main --head feature-branch",
         ));
+}
+
+#[test]
+fn submit_fails_when_parent_discovery_errors() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env("STCK_TEST_PR_LIST_FAIL", "1");
+    cmd.arg("submit");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: could not auto-detect stack parent for feature-branch: failed to list open pull requests from GitHub; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
+    ));
 }
 
 #[test]

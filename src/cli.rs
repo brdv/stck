@@ -304,14 +304,16 @@ fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> ExitCode {
 }
 
 /// Discover the correct PR base for a bootstrap PR by finding the nearest
-/// ancestor branch that has an open PR. Falls back to `default_branch`.
+/// ancestor branch that has an open PR. Falls back to `default_branch` only
+/// when no suitable ancestor PR is found.
 fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, String> {
     // Find all open PRs whose head branch is a git ancestor of `branch`.
     // The closest ancestor (by commit distance) wins.
-    let prs = match github::list_open_prs() {
-        Ok(prs) => prs,
-        Err(_) => return Ok(default_branch.to_string()),
-    };
+    let prs = github::list_open_prs().map_err(|message| {
+        format!(
+            "could not auto-detect stack parent for {branch}: {message}; retry or pass `--base <branch>` explicitly"
+        )
+    })?;
 
     let branch_ref = format!("refs/heads/{branch}");
     let mut best: Option<&str> = None;
