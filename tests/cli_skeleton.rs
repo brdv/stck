@@ -1174,6 +1174,71 @@ fn push_skips_cached_sync_plan_retargets_that_are_already_satisfied() {
 }
 
 #[test]
+fn push_resume_clears_stale_state_when_remaining_retargets_are_already_satisfied() {
+    let (temp, mut push) = stck_cmd_with_stubbed_tools();
+    let log_path = temp.path().join("push-resume-stale-state.log");
+    let _ = fs::remove_file(&log_path);
+
+    let stck_dir = temp.path().join("git-dir").join("stck");
+    fs::create_dir_all(&stck_dir).expect("stck state dir should exist");
+    let state_path = stck_dir.join("last-plan.json");
+    fs::write(
+        &state_path,
+        r#"{
+  "kind": "push",
+  "push_branches": ["feature-branch", "feature-child"],
+  "completed_pushes": 2,
+  "retargets": [
+    {"branch": "feature-branch", "new_base_ref": "main"},
+    {"branch": "feature-child", "new_base_ref": "feature-branch"}
+  ],
+  "completed_retargets": 0
+}"#,
+    )
+    .expect("push state should be written");
+
+    let cached_plan_path = stck_dir.join("last-sync-plan.json");
+    fs::write(
+        &cached_plan_path,
+        r#"{
+  "default_branch": "main",
+  "retargets": [
+    {"branch": "feature-branch", "new_base_ref": "main"},
+    {"branch": "feature-child", "new_base_ref": "feature-branch"}
+  ]
+}"#,
+    )
+    .expect("cached sync plan should be written");
+
+    push.env("STCK_TEST_LOG", log_path.as_os_str());
+    push.env("STCK_TEST_FEATURE_BRANCH_BASE", "main");
+    push.arg("push");
+
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 0 branch(es) and applied 0 PR base update(s) in this run.",
+        ))
+        .stdout(predicate::str::contains("$ gh pr edit").not());
+
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).expect("push log should be readable");
+        assert!(
+            !log.contains("pr edit"),
+            "resume should skip retarget calls when saved retargets are already satisfied"
+        );
+    }
+    assert!(
+        !state_path.exists(),
+        "push state should be cleared after a no-op resume succeeds"
+    );
+    assert!(
+        !cached_plan_path.exists(),
+        "cached sync plan should be cleared after a no-op resume succeeds"
+    );
+}
+
+#[test]
 fn push_skips_branches_without_local_changes() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = std::env::temp_dir().join("stck-push-no-divergence.log");

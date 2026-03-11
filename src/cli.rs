@@ -696,7 +696,33 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
     };
 
     let mut state = match existing_state {
-        Some(state) => state,
+        Some(mut state) => {
+            if state.completed_retargets < state.retargets.len() {
+                let stack = match github::discover_linear_stack(
+                    &preflight.current_branch,
+                    &preflight.default_branch,
+                ) {
+                    Ok(stack) => stack,
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
+                };
+
+                state.retargets = stack::filter_pending_retargets(
+                    state.retargets[state.completed_retargets..].to_vec(),
+                    &stack,
+                );
+                state.completed_retargets = 0;
+
+                if let Err(message) = sync_state::save_push(&state) {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            }
+
+            state
+        }
         None => {
             let stack = match github::discover_linear_stack(
                 &preflight.current_branch,
