@@ -350,48 +350,103 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
     exit 1
   fi
 
-  # Detect --state flag
+  # Detect --state and --base flags
   pr_list_state="all"
+  pr_list_base=""
   for ((i=1; i<=$#; i++)); do
     if [[ "${!i}" == "--state" ]]; then
       next=$((i+1))
       pr_list_state="${!next}"
     fi
+    if [[ "${!i}" == "--base" ]]; then
+      next=$((i+1))
+      pr_list_base="${!next}"
+    fi
   done
 
-  if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" ]]; then
-    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child-a","baseRefName":"feature-branch","state":"OPEN","mergedAt":null},{"number":103,"headRefName":"feature-child-b","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
+  # Targeted child discovery: gh pr list --base <branch>
+  if [[ -n "${pr_list_base}" ]]; then
+    if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" && "${pr_list_base}" == "feature-branch" ]]; then
+      echo '[{"number":102,"headRefName":"feature-child-a","baseRefName":"feature-branch","state":"OPEN"},{"number":103,"headRefName":"feature-child-b","baseRefName":"feature-branch","state":"OPEN"}]'
+      exit 0
+    fi
+    if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
+      case "${pr_list_base}" in
+        main) echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN"}]' ;;
+        feature-base) echo '[{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN"}]' ;;
+        feature-branch) echo '[{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN"}]' ;;
+        *) echo '[]' ;;
+      esac
+      exit 0
+    fi
+    # Default children for the default stack
+    case "${pr_list_base}" in
+      feature-base) echo '[{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN"}]' ;;
+      feature-branch) echo '[{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN"}]' ;;
+      *) echo '[]' ;;
+    esac
     exit 0
   fi
 
-  if [[ "${STCK_TEST_MISSING_CURRENT_PR:-0}" == "1" ]]; then
-    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"}]'
-    exit 0
-  fi
-
-  if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
-    echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN","mergedAt":null},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
-    exit 0
-  fi
-
+  # Bulk list (used by list_open_prs for parent discovery)
   if [[ -n "${STCK_TEST_OPEN_PRS_JSON:-}" && "${pr_list_state}" == "open" ]]; then
     echo "${STCK_TEST_OPEN_PRS_JSON}"
     exit 0
   fi
 
-  # Default: return all PRs (merged + open)
-  echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"},{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null},{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","mergedAt":null}]'
+  # Default bulk list for list_open_prs
+  echo '[]'
   exit 0
 fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
   branch="${3:-}"
+  all_args="$*"
+
   if [[ "${STCK_TEST_PR_VIEW_ERROR:-0}" == "1" ]]; then
     echo "network unavailable" >&2
     exit 1
   fi
+
+  # Stack discovery path (full field set including headRefName)
+  if [[ "${all_args}" == *"headRefName"* ]]; then
+    if [[ "${STCK_TEST_MISSING_CURRENT_PR:-0}" == "1" && "${branch}" == "feature-branch" ]]; then
+      echo "no pull requests found for branch ${branch}" >&2
+      exit 1
+    fi
+
+    if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" ]]; then
+      case "${branch}" in
+        feature-base) echo '{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED"}' ;;
+        feature-branch) echo '{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN"}' ;;
+        *) echo "no pull requests found for branch ${branch}" >&2; exit 1 ;;
+      esac
+      exit 0
+    fi
+
+    if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
+      case "${branch}" in
+        feature-base) echo '{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN"}' ;;
+        feature-branch) echo '{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN"}' ;;
+        feature-child) echo '{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN"}' ;;
+        *) echo "no pull requests found for branch ${branch}" >&2; exit 1 ;;
+      esac
+      exit 0
+    fi
+
+    # Default: feature-base(merged) -> feature-branch(open) -> feature-child(open)
+    case "${branch}" in
+      feature-base) echo '{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED"}' ;;
+      feature-branch) echo '{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN"}' ;;
+      feature-child) echo '{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN"}' ;;
+      *) echo "no pull requests found for branch ${branch}" >&2; exit 1 ;;
+    esac
+    exit 0
+  fi
+
+  # Legacy: pr_exists_for_head check (--json number)
   if [[ "${STCK_TEST_HAS_CURRENT_PR:-0}" == "1" && "${branch}" == "feature-branch" ]]; then
-    echo '{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","mergedAt":null}'
+    echo '{"number":101}'
     exit 0
   fi
   echo "no pull requests found for branch" >&2
