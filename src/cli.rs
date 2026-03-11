@@ -554,6 +554,15 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 }
             };
 
+        let total_steps = state.steps.len();
+        println!(
+            "Step {}/{}: rebasing {} onto {} (from {})",
+            index + 1,
+            total_steps,
+            step.branch,
+            step.new_base_ref,
+            step.old_base_ref
+        );
         println!(
             "$ git rebase --onto {} {} {}",
             step.new_base_ref, old_base_sha, step.branch
@@ -566,6 +575,13 @@ fn run_sync(preflight: &env::PreflightContext, continue_sync: bool, reset_sync: 
                 return ExitCode::from(1);
             }
             eprintln!("error: {message}");
+            eprintln!();
+            eprintln!("To recover:");
+            eprintln!("  1. Resolve conflicts and run `git rebase --continue`");
+            eprintln!("     Then run `stck sync --continue` to resume.");
+            eprintln!(
+                "  2. Or run `git rebase --abort` and then `stck sync --reset` to start over."
+            );
             return ExitCode::from(1);
         }
 
@@ -692,6 +708,12 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
 
     for index in state.completed_pushes..state.push_branches.len() {
         let branch = &state.push_branches[index];
+        println!(
+            "Pushing branch {}/{}: {}",
+            index + 1,
+            state.push_branches.len(),
+            branch
+        );
         println!("$ git push --force-with-lease origin {branch}");
         if let Err(message) = gitops::push_force_with_lease(branch) {
             if let Err(save_error) = sync_state::save_push(&state) {
@@ -699,6 +721,8 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
                 return ExitCode::from(1);
             }
             eprintln!("error: {message}");
+            eprintln!();
+            eprintln!("Fix the push error and rerun `stck push` to resume.");
             return ExitCode::from(1);
         }
 
@@ -712,6 +736,13 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
     for index in state.completed_retargets..state.retargets.len() {
         let retarget = &state.retargets[index];
         println!(
+            "Retargeting PR {}/{}: {} -> {}",
+            index + 1,
+            state.retargets.len(),
+            retarget.branch,
+            retarget.new_base_ref
+        );
+        println!(
             "$ gh pr edit {} --base {}",
             retarget.branch, retarget.new_base_ref
         );
@@ -721,6 +752,8 @@ fn run_push(preflight: &env::PreflightContext) -> ExitCode {
                 return ExitCode::from(1);
             }
             eprintln!("error: {message}");
+            eprintln!();
+            eprintln!("Fix the GitHub error and rerun `stck push` to resume.");
             return ExitCode::from(1);
         }
 

@@ -1,5 +1,7 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::{env, path::PathBuf};
+
+use crate::util::with_stderr;
 
 pub fn fetch_origin() -> Result<(), String> {
     let output = Command::new("git")
@@ -151,35 +153,33 @@ pub fn branch_needs_sync_with_default(default_branch: &str, branch: &str) -> Res
 }
 
 pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let status = Command::new("git")
         .args(["rebase", "--onto", new_base, old_base, branch])
-        .output()
+        .stderr(Stdio::inherit())
+        .status()
         .map_err(|_| "failed to run `git rebase`; ensure this is a git repository".to_string())?;
 
-    if output.status.success() {
+    if status.success() {
         Ok(())
     } else {
-        Err(with_stderr(
-            &format!(
-                "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
-            ),
-            &output.stderr,
+        Err(format!(
+            "rebase failed for branch {branch}; resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then rerun `stck sync`"
         ))
     }
 }
 
 pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let status = Command::new("git")
         .args(["push", "--force-with-lease", "origin", branch])
-        .output()
+        .stderr(Stdio::inherit())
+        .status()
         .map_err(|_| "failed to run `git push`; ensure this is a git repository".to_string())?;
 
-    if output.status.success() {
+    if status.success() {
         Ok(())
     } else {
-        Err(with_stderr(
-            &format!("push failed for branch {branch}; fix the push error and rerun `stck push`"),
-            &output.stderr,
+        Err(format!(
+            "push failed for branch {branch}; fix the push error and rerun `stck push`"
         ))
     }
 }
@@ -315,14 +315,5 @@ fn ref_exists(reference: &str) -> Result<bool, String> {
         _ => Err(format!(
             "failed to verify git reference `{reference}`; ensure this is a git repository"
         )),
-    }
-}
-
-fn with_stderr(base: &str, stderr: &[u8]) -> String {
-    let detail = String::from_utf8_lossy(stderr).trim().to_string();
-    if detail.is_empty() {
-        base.to_string()
-    } else {
-        format!("{base}; stderr: {detail}")
     }
 }
