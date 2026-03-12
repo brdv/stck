@@ -365,6 +365,34 @@ fn sync_then_push_after_squash_merge_produces_correct_retargets() {
 }
 
 #[test]
+fn push_aborts_when_remote_has_commits_not_in_local_branch() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-push-diverged.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_NEEDS_PUSH_BRANCHES", "feature-branch");
+    // Simulate remote/feature-branch NOT being an ancestor of local feature-branch,
+    // meaning the remote has commits that would be lost on force push.
+    cmd.env(
+        "STCK_TEST_NOT_ANCESTOR_PAIRS",
+        "feature-branch:feature-branch",
+    );
+    cmd.arg("push");
+
+    cmd.assert()
+        .code(1)
+        .stderr(predicate::str::contains("feature-branch"));
+
+    // The force push should NOT have been executed.
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).expect("push log should be readable");
+        assert!(
+            !log.contains("push --force-with-lease origin feature-branch"),
+            "push should not force-push a branch whose remote has diverged"
+        );
+    }
+}
+
+#[test]
 fn push_blocked_while_sync_state_exists() {
     let (temp, mut sync) = stck_cmd_with_stubbed_tools();
     sync.env("STCK_TEST_REBASE_FAIL", "1");

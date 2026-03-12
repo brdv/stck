@@ -733,6 +733,28 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
 
     for index in state.completed_pushes..state.push_branches.len() {
         let branch = &state.push_branches[index];
+
+        let remote_ref = format!("refs/remotes/origin/{branch}");
+        let local_ref = format!("refs/heads/{branch}");
+        match gitops::is_ancestor(&remote_ref, &local_ref) {
+            Ok(true) => {}
+            Ok(false) => {
+                if let Err(save_error) = sync_state::save_push(&state) {
+                    eprintln!("error: {save_error}");
+                    return ExitCode::from(1);
+                }
+                eprintln!(
+                    "error: remote branch `origin/{branch}` has commits not in local `{branch}`; \
+                     pull or rebase to integrate remote changes before pushing"
+                );
+                return ExitCode::from(1);
+            }
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        }
+
         println!(
             "Pushing branch {}/{}: {}",
             index + 1,
