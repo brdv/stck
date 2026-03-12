@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.4] - 2026-03-12
+
+### Added
+
+- `stck new` and `stck submit` now auto-push when the branch has an upstream but has unpushed local commits, removing the manual `git push` step between stacked branch operations.
+
+### Changed
+
+- Sync step messaging now shows "dropping already-upstream commits" instead of the confusing "onto main (from main)" when the base branch name is unchanged after a parent PR merge.
+
+### Fixed
+
+- Fixed `stck sync` using stale local main ref as the rebase target after a parent PR merges on GitHub. Sync now prefers `refs/remotes/origin/<branch>` for the `--onto` target, matching the fetched remote state.
+- Fixed chained sync regression where rebasing a 3+ branch stack left descendant branches with diverged history. The sync loop now tracks branches rebased in earlier steps and uses their local ref for subsequent steps.
+
 ## [0.1.3] - 2026-03-11
 
 ### Added
