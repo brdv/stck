@@ -174,6 +174,21 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
             }
+        } else {
+            let needs_push = match gitops::branch_needs_push(current_branch) {
+                Ok(needs_push) => needs_push,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+            if needs_push {
+                println!("$ git push origin {}", current_branch);
+                if let Err(message) = gitops::push_branch(current_branch) {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            }
         }
 
         let current_has_pr = match github::pr_exists_for_head(current_branch) {
@@ -308,6 +323,21 @@ pub(crate) fn run_submit(
         if let Err(message) = gitops::push_set_upstream(current_branch) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
+        }
+    } else {
+        let needs_push = match gitops::branch_needs_push(current_branch) {
+            Ok(needs_push) => needs_push,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+        if needs_push {
+            println!("$ git push origin {}", current_branch);
+            if let Err(message) = gitops::push_branch(current_branch) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
         }
     }
 
@@ -532,6 +562,11 @@ pub(crate) fn run_sync(
         }
     }
 
+    // Track branches rebased in this sync run so subsequent steps that depend
+    // on them use the just-updated local ref instead of the stale remote ref.
+    let mut rebased_in_this_sync: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
     for index in state.completed_steps..state.steps.len() {
         let step = &state.steps[index];
         let branch_ref = format!("refs/heads/{}", step.branch);
@@ -550,21 +585,44 @@ pub(crate) fn run_sync(
                     return ExitCode::from(1);
                 }
             };
+        let onto_ref = if rebased_in_this_sync.contains(&step.new_base_ref) {
+            // Parent was rebased in a prior step of this sync; the local ref
+            // is up-to-date but the remote ref is stale (not yet pushed).
+            format!("refs/heads/{}", step.new_base_ref)
+        } else {
+            match gitops::resolve_onto_ref(&step.new_base_ref) {
+                Ok(r) => r,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            }
+        };
 
         let total_steps = state.steps.len();
-        println!(
-            "Step {}/{}: rebasing {} onto {} (from {})",
-            index + 1,
-            total_steps,
-            step.branch,
-            step.new_base_ref,
-            step.old_base_ref
-        );
+        if step.old_base_ref == step.new_base_ref {
+            println!(
+                "Step {}/{}: rebasing {} onto {} (dropping already-upstream commits)",
+                index + 1,
+                total_steps,
+                step.branch,
+                step.new_base_ref
+            );
+        } else {
+            println!(
+                "Step {}/{}: rebasing {} onto {} (from {})",
+                index + 1,
+                total_steps,
+                step.branch,
+                step.new_base_ref,
+                step.old_base_ref
+            );
+        }
         println!(
             "$ git rebase --onto {} {} {}",
-            step.new_base_ref, old_base_sha, step.branch
+            onto_ref, old_base_sha, step.branch
         );
-        if let Err(message) = gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch) {
+        if let Err(message) = gitops::rebase_onto(&onto_ref, &old_base_sha, &step.branch) {
             state.failed_step = Some(index);
             state.failed_step_branch_head = Some(branch_head);
             if let Err(save_error) = sync_state::save_sync(&state) {
@@ -582,6 +640,7 @@ pub(crate) fn run_sync(
             return ExitCode::from(1);
         }
 
+        rebased_in_this_sync.insert(step.branch.clone());
         state.completed_steps = index + 1;
         state.failed_step = None;
         state.failed_step_branch_head = None;

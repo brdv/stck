@@ -87,6 +87,13 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
         fi
         ;;
       feature-child) echo "3333333333333333333333333333333333333333" ;;
+      main)
+        if [[ -n "${STCK_TEST_LOCAL_MAIN_SHA:-}" ]]; then
+          echo "${STCK_TEST_LOCAL_MAIN_SHA}"
+        else
+          echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        fi
+        ;;
       *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     esac
     exit 0
@@ -115,6 +122,13 @@ if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
         ;;
       feature-branch) echo "2222222222222222222222222222222222222222" ;;
       feature-child) echo "3333333333333333333333333333333333333333" ;;
+      main)
+        if [[ -n "${STCK_TEST_REMOTE_MAIN_SHA:-}" ]]; then
+          echo "${STCK_TEST_REMOTE_MAIN_SHA}"
+        else
+          echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        fi
+        ;;
       *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     esac
     exit 0
@@ -209,8 +223,19 @@ if [[ "${1:-}" == "merge-base" && "${2:-}" != "--is-ancestor" ]]; then
     refs/remotes/origin/feature-branch)
       echo "2222222222222222222222222222222222222222"
       ;;
-    refs/heads/main|refs/remotes/origin/main)
-      echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    refs/heads/main)
+      if [[ -n "${STCK_TEST_LOCAL_MAIN_SHA:-}" ]]; then
+        echo "${STCK_TEST_LOCAL_MAIN_SHA}"
+      else
+        echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      fi
+      ;;
+    refs/remotes/origin/main)
+      if [[ -n "${STCK_TEST_REMOTE_MAIN_SHA:-}" ]]; then
+        echo "${STCK_TEST_REMOTE_MAIN_SHA}"
+      else
+        echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      fi
       ;;
     *) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
   esac
@@ -280,6 +305,17 @@ fi
 
 if [[ "${1:-}" == "push" && "${2:-}" == "--force-with-lease" && "${3:-}" == "origin" ]]; then
   branch="${4:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_PUSH_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "push" && "${2:-}" == "origin" ]]; then
+  branch="${3:-}"
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
   fi
