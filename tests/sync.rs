@@ -28,7 +28,7 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
             "$ git rebase --onto refs/remotes/origin/main 1111111111111111111111111111111111111111 feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "$ git rebase --onto refs/remotes/origin/feature-branch 2222222222222222222222222222222222222222 feature-child",
+            "$ git rebase --onto refs/heads/feature-branch 2222222222222222222222222222222222222222 feature-child",
         ))
         .stdout(predicate::str::contains("$ git checkout feature-branch"))
         .stdout(predicate::str::contains(
@@ -40,7 +40,7 @@ fn sync_executes_rebase_plan_and_prints_success_message() {
         log.contains("rebase --onto refs/remotes/origin/main 1111111111111111111111111111111111111111 feature-branch")
     );
     assert!(log.contains(
-        "rebase --onto refs/remotes/origin/feature-branch 2222222222222222222222222222222222222222 feature-child"
+        "rebase --onto refs/heads/feature-branch 2222222222222222222222222222222222222222 feature-child"
     ));
     assert!(log.contains("checkout feature-branch"));
 }
@@ -145,10 +145,10 @@ fn sync_rebases_when_default_branch_has_advanced() {
             "$ git rebase --onto refs/remotes/origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature-base",
         ))
         .stdout(predicate::str::contains(
-            "$ git rebase --onto refs/remotes/origin/feature-base 1111111111111111111111111111111111111111 feature-branch",
+            "$ git rebase --onto refs/heads/feature-base 1111111111111111111111111111111111111111 feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "$ git rebase --onto refs/remotes/origin/feature-branch 2222222222222222222222222222222222222222 feature-child",
+            "$ git rebase --onto refs/heads/feature-branch 2222222222222222222222222222222222222222 feature-child",
         ));
 }
 
@@ -270,13 +270,13 @@ fn sync_reset_recomputes_from_scratch_after_failure() {
             "$ git rebase --onto refs/remotes/origin/main 1111111111111111111111111111111111111111 feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "$ git rebase --onto refs/remotes/origin/feature-branch 2222222222222222222222222222222222222222 feature-child",
+            "$ git rebase --onto refs/heads/feature-branch 2222222222222222222222222222222222222222 feature-child",
         ));
 
     let log = fs::read_to_string(&log_path).expect("rebase log should exist");
     let first_step = "rebase --onto refs/remotes/origin/main 1111111111111111111111111111111111111111 feature-branch";
     let second_step =
-        "rebase --onto refs/remotes/origin/feature-branch 2222222222222222222222222222222222222222 feature-child";
+        "rebase --onto refs/heads/feature-branch 2222222222222222222222222222222222222222 feature-child";
     assert_eq!(
         log.matches(first_step).count(),
         2,
@@ -489,6 +489,47 @@ fn sync_uses_remote_main_when_local_main_is_stale() {
     assert!(
         !log.contains("rebase --onto refs/remotes/origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         "sync should NOT use stale local main as old-base. Log: {log}"
+    );
+}
+
+#[test]
+fn sync_chained_rebase_uses_local_ref_for_previously_rebased_branch() {
+    // After a bottom PR merges, sync cascades through the chain:
+    //   Step 1: rebase feature-branch onto main (from feature-base)
+    //   Step 2: rebase feature-child onto feature-branch
+    //
+    // Step 1's --onto target should be refs/remotes/origin/main (remote is
+    // up-to-date after fetch; local main may be stale).
+    //
+    // Step 2's --onto target should be refs/heads/feature-branch (local ref
+    // was just updated by the rebase in step 1; remote hasn't been pushed yet
+    // and is stale).
+    //
+    // Without the fix, step 2 uses refs/remotes/origin/feature-branch which
+    // still points to the pre-rebase commit, making the rebase a no-op.
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-sync-chained.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.arg("sync");
+
+    cmd.assert().success();
+
+    let log = fs::read_to_string(&log_path).expect("sync log should exist");
+
+    // Step 1: onto target must be the remote ref (handles stale local main)
+    assert!(
+        log.contains("rebase --onto refs/remotes/origin/main"),
+        "step 1 should use remote ref for default branch. Log:\n{log}"
+    );
+
+    // Step 2: onto target must be the LOCAL ref (parent was just rebased)
+    assert!(
+        log.contains("rebase --onto refs/heads/feature-branch"),
+        "step 2 should use local ref for branch rebased in prior step. Log:\n{log}"
+    );
+    assert!(
+        !log.contains("rebase --onto refs/remotes/origin/feature-branch"),
+        "step 2 should NOT use stale remote ref for branch rebased in prior step. Log:\n{log}"
     );
 }
 
