@@ -123,6 +123,30 @@ fn submit_noops_when_pr_exists() {
 }
 
 #[test]
+fn submit_auto_pushes_when_upstream_exists_but_branch_needs_push() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-submit-auto-push.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_HAS_UPSTREAM", "1");
+    cmd.env("STCK_TEST_NEEDS_PUSH_BRANCH", "feature-branch");
+    cmd.args(["submit", "--base", "main"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("$ git push origin feature-branch"));
+
+    let log = fs::read_to_string(&log_path).expect("submit log should exist");
+    assert!(
+        log.contains("push origin feature-branch"),
+        "submit should auto-push current branch when it has upstream but needs push"
+    );
+    assert!(
+        !log.contains("push -u origin feature-branch"),
+        "submit should use regular push, not push -u, when upstream already exists"
+    );
+}
+
+#[test]
 fn submit_rejects_default_branch() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.env("STCK_TEST_CURRENT_BRANCH", "main");

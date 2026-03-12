@@ -289,6 +289,17 @@ if [[ "${1:-}" == "push" && "${2:-}" == "--force-with-lease" && "${3:-}" == "ori
   exit 0
 fi
 
+if [[ "${1:-}" == "push" && "${2:-}" == "origin" ]]; then
+  branch="${3:-}"
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
+  if [[ "${STCK_TEST_PUSH_FAIL_BRANCH:-}" == "${branch}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "push" && "${2:-}" == "-u" && "${3:-}" == "origin" ]]; then
   branch="${4:-}"
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then

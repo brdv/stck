@@ -201,6 +201,54 @@ fn new_rejects_invalid_branch_name() {
 }
 
 #[test]
+fn new_auto_pushes_when_upstream_exists_but_branch_needs_push() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-new-auto-push.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_HAS_UPSTREAM", "1");
+    cmd.env("STCK_TEST_NEEDS_PUSH_BRANCH", "feature-branch");
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("$ git push origin feature-branch"));
+
+    let log = fs::read_to_string(&log_path).expect("new log should exist");
+    assert!(
+        log.contains("push origin feature-branch"),
+        "new should auto-push current branch when it has upstream but needs push"
+    );
+    assert!(
+        !log.contains("push -u origin feature-branch"),
+        "new should use regular push, not push -u, when upstream already exists"
+    );
+}
+
+#[test]
+fn new_skips_push_when_upstream_exists_and_branch_is_up_to_date() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-new-no-push.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_HAS_UPSTREAM", "1");
+    cmd.env("STCK_TEST_HAS_CURRENT_PR", "1");
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().success();
+
+    let log = fs::read_to_string(&log_path).expect("new log should exist");
+    assert!(
+        !log.contains("push origin feature-branch"),
+        "new should not push when branch is already up to date with remote"
+    );
+    assert!(
+        !log.contains("push -u origin feature-branch"),
+        "new should not push -u when upstream already exists"
+    );
+}
+
+#[test]
 fn new_fails_when_pr_presence_check_errors() {
     let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "stck-new-pr-view-error.log");
