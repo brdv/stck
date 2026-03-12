@@ -564,7 +564,8 @@ pub(crate) fn run_sync(
 
     // Track branches rebased in this sync run so subsequent steps that depend
     // on them use the just-updated local ref instead of the stale remote ref.
-    let mut rebased_in_this_sync: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut rebased_in_this_sync: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     for index in state.completed_steps..state.steps.len() {
         let step = &state.steps[index];

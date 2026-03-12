@@ -357,7 +357,9 @@ fn sync_after_squash_merge_uses_merge_base_for_old_base() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("$ git rebase --onto refs/remotes/origin/main"))
+        .stdout(predicate::str::contains(
+            "$ git rebase --onto refs/remotes/origin/main",
+        ))
         .stdout(predicate::str::contains("feature-branch"))
         .stdout(predicate::str::contains(
             "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
@@ -487,7 +489,9 @@ fn sync_uses_remote_main_when_local_main_is_stale() {
         "sync should use remote merge-base and remote onto ref. Log: {log}"
     );
     assert!(
-        !log.contains("rebase --onto refs/remotes/origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        !log.contains(
+            "rebase --onto refs/remotes/origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ),
         "sync should NOT use stale local main as old-base. Log: {log}"
     );
 }
