@@ -372,7 +372,10 @@ fn push_aborts_when_remote_has_commits_not_in_local_branch() {
     cmd.env("STCK_TEST_NEEDS_PUSH_BRANCHES", "feature-branch");
     // Simulate remote/feature-branch NOT being an ancestor of local feature-branch,
     // meaning the remote has commits that would be lost on force push.
-    cmd.env("STCK_TEST_NOT_ANCESTOR_PAIRS", "feature-branch:feature-branch");
+    cmd.env(
+        "STCK_TEST_NOT_ANCESTOR_PAIRS",
+        "feature-branch:feature-branch",
+    );
     cmd.arg("push");
 
     cmd.assert()
