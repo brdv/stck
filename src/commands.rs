@@ -174,6 +174,21 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
             }
+        } else {
+            let needs_push = match gitops::branch_needs_push(current_branch) {
+                Ok(needs_push) => needs_push,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
+            if needs_push {
+                println!("$ git push origin {}", current_branch);
+                if let Err(message) = gitops::push_branch(current_branch) {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            }
         }
 
         let current_has_pr = match github::pr_exists_for_head(current_branch) {
@@ -308,6 +323,21 @@ pub(crate) fn run_submit(
         if let Err(message) = gitops::push_set_upstream(current_branch) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
+        }
+    } else {
+        let needs_push = match gitops::branch_needs_push(current_branch) {
+            Ok(needs_push) => needs_push,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+        if needs_push {
+            println!("$ git push origin {}", current_branch);
+            if let Err(message) = gitops::push_branch(current_branch) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
         }
     }
 
@@ -552,14 +582,24 @@ pub(crate) fn run_sync(
             };
 
         let total_steps = state.steps.len();
-        println!(
-            "Step {}/{}: rebasing {} onto {} (from {})",
-            index + 1,
-            total_steps,
-            step.branch,
-            step.new_base_ref,
-            step.old_base_ref
-        );
+        if step.old_base_ref == step.new_base_ref {
+            println!(
+                "Step {}/{}: rebasing {} onto {} (dropping already-upstream commits)",
+                index + 1,
+                total_steps,
+                step.branch,
+                step.new_base_ref
+            );
+        } else {
+            println!(
+                "Step {}/{}: rebasing {} onto {} (from {})",
+                index + 1,
+                total_steps,
+                step.branch,
+                step.new_base_ref,
+                step.old_base_ref
+            );
+        }
         println!(
             "$ git rebase --onto {} {} {}",
             step.new_base_ref, old_base_sha, step.branch

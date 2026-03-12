@@ -192,6 +192,27 @@ pub fn rebase_onto(new_base: &str, old_base: &str, branch: &str) -> Result<(), S
     }
 }
 
+/// Push `branch` to `origin` as a regular (fast-forward) push.
+///
+/// Unlike [`push_force_with_lease`] this does **not** rewrite remote history.
+/// A non-fast-forward push will fail, which is the desired safety behaviour
+/// when the caller simply wants to publish new local commits.
+pub fn push_branch(branch: &str) -> Result<(), String> {
+    let status = Command::new("git")
+        .args(["push", "origin", branch])
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|_| "failed to run `git push`; ensure this is a git repository".to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "push failed for branch {branch}; fix the push error and retry"
+        ))
+    }
+}
+
 /// Push `branch` to `origin` with `--force-with-lease`.
 pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
     let status = Command::new("git")
