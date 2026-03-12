@@ -580,6 +580,13 @@ pub(crate) fn run_sync(
                     return ExitCode::from(1);
                 }
             };
+        let onto_ref = match gitops::resolve_onto_ref(&step.new_base_ref) {
+            Ok(r) => r,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
 
         let total_steps = state.steps.len();
         if step.old_base_ref == step.new_base_ref {
@@ -602,9 +609,9 @@ pub(crate) fn run_sync(
         }
         println!(
             "$ git rebase --onto {} {} {}",
-            step.new_base_ref, old_base_sha, step.branch
+            onto_ref, old_base_sha, step.branch
         );
-        if let Err(message) = gitops::rebase_onto(&step.new_base_ref, &old_base_sha, &step.branch) {
+        if let Err(message) = gitops::rebase_onto(&onto_ref, &old_base_sha, &step.branch) {
             state.failed_step = Some(index);
             state.failed_step_branch_head = Some(branch_head);
             if let Err(save_error) = sync_state::save_sync(&state) {

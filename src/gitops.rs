@@ -46,6 +46,12 @@ pub fn resolve_ref(reference: &str) -> Result<String, String> {
     rev_parse(reference)
 }
 
+/// Resolve the `--onto` target ref for a rebase, preferring `origin/<branch>`
+/// over the local ref so the rebase target reflects the fetched remote state.
+pub fn resolve_onto_ref(base_branch: &str) -> Result<String, String> {
+    resolve_base_ref(base_branch)
+}
+
 /// Resolve the fork point to use as the old base for `git rebase --onto`.
 ///
 /// This prefers the merge-base between `branch` and `base_branch` so sync can
@@ -66,14 +72,18 @@ pub fn resolve_old_base_for_rebase(base_branch: &str, branch: &str) -> Result<St
 }
 
 fn resolve_base_ref(base_branch: &str) -> Result<String, String> {
-    let local_ref = format!("refs/heads/{base_branch}");
-    if ref_exists(&local_ref)? {
-        return Ok(local_ref);
-    }
-
+    // Prefer the remote ref because `stck sync` fetches before planning.
+    // Using the local ref for shared branches like the default branch can
+    // produce a stale merge-base when the remote has advanced (e.g. after a
+    // PR merge on GitHub while local main has not been pulled).
     let remote_ref = format!("refs/remotes/origin/{base_branch}");
     if ref_exists(&remote_ref)? {
         return Ok(remote_ref);
+    }
+
+    let local_ref = format!("refs/heads/{base_branch}");
+    if ref_exists(&local_ref)? {
+        return Ok(local_ref);
     }
 
     Err(format!(
