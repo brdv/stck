@@ -228,6 +228,16 @@ if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
   descendant_branch="${descendant#refs/heads/}"
   descendant_branch="${descendant_branch#refs/remotes/origin/}"
 
+  if [[ -n "${STCK_TEST_NOT_ANCESTOR_PAIRS:-}" ]]; then
+    IFS=',' read -ra pairs <<< "${STCK_TEST_NOT_ANCESTOR_PAIRS}"
+    for pair in "${pairs[@]}"; do
+      IFS=':' read -r pa pd <<< "${pair}"
+      if [[ "${ancestor_branch}" == "${pa}" && "${descendant_branch}" == "${pd}" ]]; then
+        exit 1
+      fi
+    done
+  fi
+
   if [[ -n "${STCK_TEST_ANCESTOR_PAIRS:-}" ]]; then
     IFS=',' read -ra pairs <<< "${STCK_TEST_ANCESTOR_PAIRS}"
     for pair in "${pairs[@]}"; do
@@ -236,6 +246,10 @@ if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
         exit 0
       fi
     done
+  fi
+
+  if [[ "${ancestor_branch}" == "${descendant_branch}" ]]; then
+    exit 0
   fi
 
   case "${ancestor_branch}:${descendant_branch}" in
