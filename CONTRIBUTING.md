@@ -28,3 +28,10 @@ that version and the current stable toolchain.
 - Document what an item does, important invariants or assumptions, and notable error behavior when that is not obvious from the code alone.
 - Use inline `//` comments sparingly and only for non-obvious logic or workflow invariants.
 - Prefer reducing visibility over documenting accidental public API surface.
+
+## Behavioral Contracts
+
+The tracked [sync recovery contract](./docs/sync-recovery.md) is normative.
+Changes to sync state or recovery must preserve its fail-closed guarantees or
+update the contract and corresponding stubbed and real-Git tests in the same
+pull request.
