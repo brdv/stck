@@ -153,7 +153,7 @@ fn push_resumes_after_partial_retarget_failure() {
 }
 
 #[test]
-fn push_uses_cached_sync_plan_retargets_when_available() {
+fn push_uses_scoped_cached_sync_plan_when_stack_matches() {
     let (temp, mut sync) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "push-cached-plan.log");
 
@@ -181,7 +181,6 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
         "STCK_TEST_NEEDS_PUSH_BRANCHES",
         "feature-branch,feature-child",
     );
-    push.env("STCK_TEST_SYNC_NOOP", "1");
     push.arg("push");
 
     push.assert()
@@ -201,7 +200,7 @@ fn push_uses_cached_sync_plan_retargets_when_available() {
 }
 
 #[test]
-fn push_skips_cached_sync_plan_retargets_that_are_already_satisfied() {
+fn push_discards_cached_sync_plan_when_stack_metadata_changes() {
     let (temp, mut sync) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "push-cached-plan-noop-retargets.log");
 
@@ -242,7 +241,7 @@ fn push_skips_cached_sync_plan_retargets_that_are_already_satisfied() {
     let log = fs::read_to_string(&log_path).expect("push log should exist");
     assert!(
         !log.contains("pr edit"),
-        "push should skip retarget calls when cached plan bases are already satisfied"
+        "push should recompute retargets instead of reusing a cached plan for changed PR metadata"
     );
     assert!(
         !cached_plan_path.exists(),

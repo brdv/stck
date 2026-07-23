@@ -394,7 +394,7 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   if [[ "${STCK_TEST_DEFAULT_BRANCH_FAIL:-0}" == "1" ]]; then
     exit 1
   fi
-  echo "main"
+  printf 'example/stck\tmain\n'
   exit 0
 fi
 
@@ -625,7 +625,7 @@ if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
 fi
 
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
-  echo "main"
+  printf 'example/stck\tmain\n'
   exit 0
 fi
 

@@ -5,6 +5,8 @@ use std::process::Command;
 /// Repository context gathered during preflight and reused by command handlers.
 #[derive(Debug, Clone)]
 pub struct PreflightContext {
+    /// The canonical GitHub repository name in `owner/name` form.
+    pub repository: String,
     /// The currently checked-out local branch.
     pub current_branch: String,
     /// The repository's default branch as reported by GitHub.
@@ -23,9 +25,10 @@ pub fn run_preflight() -> Result<PreflightContext, String> {
     ensure_origin_remote()?;
     let current_branch = ensure_on_branch()?;
     ensure_clean_working_tree()?;
-    let default_branch = discover_default_branch()?;
+    let (repository, default_branch) = discover_repository_context()?;
 
     Ok(PreflightContext {
+        repository,
         current_branch,
         default_branch,
     })
@@ -118,15 +121,15 @@ fn ensure_clean_working_tree() -> Result<(), String> {
     }
 }
 
-fn discover_default_branch() -> Result<String, String> {
+fn discover_repository_context() -> Result<(String, String), String> {
     let output = Command::new("gh")
         .args([
             "repo",
             "view",
             "--json",
-            "defaultBranchRef",
+            "nameWithOwner,defaultBranchRef",
             "--jq",
-            ".defaultBranchRef.name",
+            r#"[.nameWithOwner, .defaultBranchRef.name] | @tsv"#,
         ])
         .output()
         .map_err(|_| "failed to discover repository default branch from GitHub".to_string())?;
@@ -138,13 +141,24 @@ fn discover_default_branch() -> Result<String, String> {
         );
     }
 
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
+    let metadata = String::from_utf8_lossy(&output.stdout);
+    let Some((repository, default_branch)) = metadata.trim().split_once('\t') else {
+        return Err(
+            "repository metadata lookup returned an invalid result; verify repository metadata on GitHub"
+                .to_string(),
+        );
+    };
+    if default_branch.is_empty() {
         Err(
             "default branch lookup returned empty result; verify repository metadata on GitHub"
                 .to_string(),
         )
+    } else if repository.is_empty() {
+        Err(
+            "repository identity lookup returned empty result; verify repository metadata on GitHub"
+                .to_string(),
+        )
     } else {
-        Ok(branch)
+        Ok((repository.to_string(), default_branch.to_string()))
     }
 }

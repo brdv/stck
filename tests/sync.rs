@@ -95,6 +95,35 @@ fn sync_reports_noop_when_stack_is_already_up_to_date() {
 }
 
 #[test]
+fn sync_noop_clears_a_stale_cached_plan() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let stck_dir = temp.path().join("git-dir").join("stck");
+    fs::create_dir_all(&stck_dir).expect("stck state dir should be created");
+    let cached_plan_path = stck_dir.join("last-sync-plan.json");
+    fs::write(
+        &cached_plan_path,
+        r#"{
+  "default_branch": "main",
+  "retargets": [
+    {"branch": "other-feature", "new_base_ref": "main"}
+  ]
+}"#,
+    )
+    .expect("stale cached plan should be written");
+
+    cmd.env("STCK_TEST_SYNC_NOOP", "1");
+    cmd.arg("sync");
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Stack is already up to date. No sync needed.",
+    ));
+    assert!(
+        !cached_plan_path.exists(),
+        "a no-op sync should clear the previous stack's cached plan"
+    );
+}
+
+#[test]
 fn sync_from_mid_stack_rebases_current_and_descendants() {
     let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "stck-sync-mid-stack.log");
