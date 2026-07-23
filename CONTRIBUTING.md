@@ -5,13 +5,15 @@ Use standard Cargo tooling for formatting, linting, tests, and build checks.
 ## Local Validation
 
 ```bash
-cargo fmt --all
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo build --all-features
+cargo fmt --all --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo build --locked --all-features
 ```
 
-The crate currently declares Rust `1.74` as its minimum supported toolchain in `Cargo.toml`.
+The project supports the current stable Rust release and the two preceding
+releases (N-2). The minimum is declared in `Cargo.toml`, and CI validates both
+that version and the current stable toolchain.
 
 ## Scope
 

@@ -39,7 +39,7 @@ jobs:
           fi
 
       - name: Build release binary
-        run: cargo build --release --all-features
+        run: cargo build --locked --release --all-features
 
       - name: Package artifact
         shell: bash

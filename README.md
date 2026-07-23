@@ -52,11 +52,12 @@ git stck --help
 ### From source
 
 ```bash
-cargo build --release --all-features
+cargo build --locked --release --all-features
 ./target/release/stck --help
 ```
 
-Source builds currently target Rust `1.74` or newer.
+`stck` supports the current stable Rust release and the two preceding releases
+(N-2). The current minimum supported Rust version is `1.95`.
 
 Homebrew release details are documented in [`docs/release-homebrew.md`](./docs/release-homebrew.md).
 

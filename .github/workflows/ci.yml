@@ -31,10 +31,27 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --all-features
+        run: cargo test --locked --all-features
 
       - name: Build
-        run: cargo build --all-features
+        run: cargo build --locked --all-features
+
+  msrv:
+    name: Minimum Rust 1.95
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.95
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check all targets
+        run: cargo check --locked --all-targets --all-features
