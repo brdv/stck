@@ -156,6 +156,9 @@ fi
 
 if [[ "${1:-}" == "show-ref" && "${2:-}" == "--verify" && "${3:-}" == "--quiet" ]]; then
   ref="${4:-}"
+  if [[ "${STCK_TEST_REF_LOOKUP_FAIL:-}" == "${ref}" ]]; then
+    exit 128
+  fi
   if [[ "${ref}" == refs/heads/* ]]; then
     branch="${ref#refs/heads/}"
     if [[ "${STCK_TEST_LOCAL_BRANCH_EXISTS:-}" == "${branch}" ]]; then

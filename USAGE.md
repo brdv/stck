@@ -112,6 +112,7 @@ stck push
 `push` applies remote changes for the last computed stack state:
 
 - pushes stack branches with `--force-with-lease`,
+- creates a missing remote branch while keeping the ancestry guard for existing remote branches,
 - applies pending PR base retarget operations,
 - reports summary and remaining work on failure.
 

@@ -88,6 +88,46 @@ fn submit_discovers_a_remote_parent_without_its_local_branch() {
 }
 
 #[test]
+fn status_and_push_handle_a_missing_remote_branch() {
+    let repo = RealGitRepo::new();
+    repo.create_branch("feature-missing-remote");
+    repo.commit_file("feature.txt", "feature\n", "Add local feature");
+    repo.write_pr_response(
+        "feature-missing-remote",
+        r#"{"number":103,"headRefName":"feature-missing-remote","baseRefName":"main","state":"OPEN"}"#,
+    );
+    repo.write_children_response("feature-missing-remote", "[]");
+
+    let mut status = repo.stck_cmd();
+    status.arg("status");
+    status
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "* feature-missing-remote PR #103 OPEN base=main [needs_push]",
+        ))
+        .stdout(predicate::str::contains(
+            "Summary: 0 needs_sync, 1 needs_push, 0 base_mismatch",
+        ));
+
+    let mut push = repo.stck_cmd();
+    push.arg("push");
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease origin feature-missing-remote",
+        ))
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 1 branch(es) and applied 0 PR base update(s) in this run.",
+        ));
+
+    assert_eq!(
+        repo.local_sha("refs/heads/feature-missing-remote"),
+        repo.remote_sha("feature-missing-remote")
+    );
+}
+
+#[test]
 fn sync_rebases_a_real_linear_stack_after_main_advances() {
     let repo = RealGitRepo::new();
 

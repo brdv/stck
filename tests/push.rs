@@ -332,6 +332,55 @@ fn push_skips_branches_without_local_changes() {
 }
 
 #[test]
+fn push_publishes_a_branch_when_its_remote_ref_is_missing() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-push-missing-remote.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_FEATURE_BRANCH_BASE", "main");
+    cmd.env("STCK_TEST_MISSING_REMOTE_BRANCH", "feature-child");
+    cmd.arg("push");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease origin feature-child",
+        ))
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 1 branch(es) and applied 0 PR base update(s) in this run.",
+        ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    assert!(
+        log.contains("push --force-with-lease origin feature-child"),
+        "push should publish a branch whose remote ref is absent"
+    );
+}
+
+#[test]
+fn push_fails_closed_when_remote_ref_lookup_errors() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-push-ref-lookup-error.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_FEATURE_BRANCH_BASE", "main");
+    cmd.env("STCK_TEST_NEEDS_PUSH_BRANCH", "feature-child");
+    cmd.env(
+        "STCK_TEST_REF_LOOKUP_FAIL",
+        "refs/remotes/origin/feature-child",
+    );
+    cmd.arg("push");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: failed to verify git reference `refs/remotes/origin/feature-child`; ensure this is a git repository",
+    ));
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("push --force-with-lease origin feature-child"),
+        "push must not treat a ref lookup failure as a missing remote branch"
+    );
+}
+
+#[test]
 fn sync_then_push_after_squash_merge_produces_correct_retargets() {
     let (temp, mut sync) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "sync-push-squash.log");
