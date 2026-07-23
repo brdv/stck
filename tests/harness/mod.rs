@@ -5,6 +5,7 @@ use assert_cmd::Command;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Output};
 use tempfile::TempDir;
 
 pub fn stck_cmd() -> Command {
@@ -576,4 +577,303 @@ pub fn stck_cmd_with_stubbed_tools() -> (TempDir, Command) {
 
 pub fn log_path(temp: &TempDir, name: &str) -> PathBuf {
     temp.path().join(name)
+}
+
+/// A temporary repository that runs the real `git` binary against a local
+/// bare `origin`, while keeping all GitHub interactions offline through a
+/// configurable `gh` stub.
+pub struct RealGitRepo {
+    _temp: TempDir,
+    worktree: PathBuf,
+    remote: PathBuf,
+    bin_dir: PathBuf,
+    gh_responses: PathBuf,
+    gh_log: PathBuf,
+    global_git_config: PathBuf,
+}
+
+impl RealGitRepo {
+    pub fn new() -> Self {
+        let temp = TempDir::new().expect("real-git tempdir should be created");
+        let worktree = temp.path().join("worktree");
+        let remote = temp.path().join("origin.git");
+        let bin_dir = temp.path().join("bin");
+        let gh_responses = temp.path().join("gh-responses");
+        let gh_log = temp.path().join("gh.log");
+        let global_git_config = temp.path().join("global.gitconfig");
+
+        fs::create_dir_all(&bin_dir).expect("real-git bin dir should be created");
+        fs::create_dir_all(&gh_responses).expect("real-git gh response dir should be created");
+        fs::write(&gh_log, "").expect("real-git gh log should be initialized");
+        fs::write(&global_git_config, "")
+            .expect("isolated global git config should be initialized");
+
+        write_stub(
+            &bin_dir.join("gh"),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "${STCK_REAL_GH_LOG}"
+
+if [[ "${1:-}" == "--version" ]]; then
+  echo "gh version 2.0.0"
+  exit 0
+fi
+
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  exit 0
+fi
+
+if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  echo "main"
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+  branch="${3:-}"
+  safe_branch="${branch//\//__}"
+  response="${STCK_REAL_GH_RESPONSES}/pr-view-${safe_branch}.json"
+  if [[ -f "${response}" ]]; then
+    cat "${response}"
+    exit 0
+  fi
+  echo "no pull requests found for branch ${branch}" >&2
+  exit 1
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
+  base=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base) base="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  if [[ -n "${base}" ]]; then
+    safe_base="${base//\//__}"
+    response="${STCK_REAL_GH_RESPONSES}/pr-list-base-${safe_base}.json"
+  else
+    response="${STCK_REAL_GH_RESPONSES}/pr-list-open.json"
+  fi
+
+  if [[ -f "${response}" ]]; then
+    cat "${response}"
+  else
+    echo "[]"
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && ( "${2:-}" == "create" || "${2:-}" == "edit" ) ]]; then
+  exit 0
+fi
+
+echo "unsupported gh invocation: $*" >&2
+exit 1
+"#,
+        );
+
+        let remote_arg = remote.to_string_lossy().into_owned();
+        let worktree_arg = worktree.to_string_lossy().into_owned();
+        assert_git_success(
+            temp.path(),
+            &global_git_config,
+            &["init", "--bare", &remote_arg],
+        );
+        assert_git_success(
+            temp.path(),
+            &global_git_config,
+            &[
+                "--git-dir",
+                &remote_arg,
+                "symbolic-ref",
+                "HEAD",
+                "refs/heads/main",
+            ],
+        );
+        assert_git_success(temp.path(), &global_git_config, &["init", &worktree_arg]);
+
+        let repo = Self {
+            _temp: temp,
+            worktree,
+            remote,
+            bin_dir,
+            gh_responses,
+            gh_log,
+            global_git_config,
+        };
+
+        let hooks_dir = repo.worktree.join(".git").join("test-hooks");
+        fs::create_dir_all(&hooks_dir).expect("isolated hooks dir should be created");
+        let hooks_arg = hooks_dir.to_string_lossy().into_owned();
+        let remote_arg = repo.remote.to_string_lossy().into_owned();
+
+        repo.git_success(&["symbolic-ref", "HEAD", "refs/heads/main"]);
+        repo.git_success(&["config", "user.name", "stck test"]);
+        repo.git_success(&["config", "user.email", "stck-test@example.com"]);
+        repo.git_success(&["config", "commit.gpgsign", "false"]);
+        repo.git_success(&["config", "core.hooksPath", &hooks_arg]);
+        repo.git_success(&["remote", "add", "origin", &remote_arg]);
+
+        fs::write(repo.worktree.join("README.md"), "initial\n")
+            .expect("initial repository file should be written");
+        repo.git_success(&["add", "README.md"]);
+        repo.git_success(&["commit", "-m", "Initial commit"]);
+        repo.git_success(&["push", "-u", "origin", "main"]);
+
+        repo
+    }
+
+    pub fn stck_cmd(&self) -> Command {
+        let mut paths = vec![self.bin_dir.clone()];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be set"),
+        ));
+        let path = std::env::join_paths(paths).expect("test PATH should be valid");
+
+        let mut cmd = stck_cmd();
+        cmd.current_dir(&self.worktree);
+        cmd.env("PATH", path);
+        cmd.env("GIT_CONFIG_GLOBAL", &self.global_git_config);
+        cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+        cmd.env("STCK_REAL_GH_LOG", &self.gh_log);
+        cmd.env("STCK_REAL_GH_RESPONSES", &self.gh_responses);
+        cmd.env_remove("GIT_DIR");
+        cmd.env_remove("GIT_WORK_TREE");
+        cmd
+    }
+
+    pub fn create_branch(&self, branch: &str) {
+        self.git_success(&["checkout", "-b", branch]);
+    }
+
+    pub fn checkout(&self, branch: &str) {
+        self.git_success(&["checkout", branch]);
+    }
+
+    pub fn commit_file(&self, relative_path: &str, contents: &str, message: &str) {
+        let path = self.worktree.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("commit file parent should be created");
+        }
+        fs::write(&path, contents).expect("commit file should be written");
+        self.git_success(&["add", "--", relative_path]);
+        self.git_success(&["commit", "-m", message]);
+    }
+
+    pub fn push(&self, branch: &str) {
+        self.git_success(&["push", "-u", "origin", branch]);
+    }
+
+    pub fn local_sha(&self, reference: &str) -> String {
+        self.git_stdout(&["rev-parse", reference])
+    }
+
+    pub fn remote_sha(&self, branch: &str) -> String {
+        let remote_arg = self.remote.to_string_lossy().into_owned();
+        let output = assert_git_success(
+            self._temp.path(),
+            &self.global_git_config,
+            &[
+                "--git-dir",
+                &remote_arg,
+                "rev-parse",
+                &format!("refs/heads/{branch}"),
+            ],
+        );
+        trimmed_stdout(output.stdout)
+    }
+
+    pub fn current_branch(&self) -> String {
+        self.git_stdout(&["branch", "--show-current"])
+    }
+
+    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
+        let output = self.git_output(&["merge-base", "--is-ancestor", ancestor, descendant]);
+        match output.status.code() {
+            Some(0) => true,
+            Some(1) => false,
+            _ => panic!(
+                "git merge-base failed\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        }
+    }
+
+    pub fn write_pr_response(&self, branch: &str, json: &str) {
+        let branch = branch.replace('/', "__");
+        fs::write(
+            self.gh_responses.join(format!("pr-view-{branch}.json")),
+            json,
+        )
+        .expect("gh PR response should be written");
+    }
+
+    pub fn write_children_response(&self, base: &str, json: &str) {
+        let base = base.replace('/', "__");
+        fs::write(
+            self.gh_responses.join(format!("pr-list-base-{base}.json")),
+            json,
+        )
+        .expect("gh children response should be written");
+    }
+
+    pub fn gh_log(&self) -> String {
+        fs::read_to_string(&self.gh_log).expect("gh log should be readable")
+    }
+
+    fn git_stdout(&self, args: &[&str]) -> String {
+        trimmed_stdout(self.git_success(args).stdout)
+    }
+
+    fn git_success(&self, args: &[&str]) -> Output {
+        let output = self.git_output(args);
+        if !output.status.success() {
+            panic!(
+                "git {} failed\nstdout: {}\nstderr: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        output
+    }
+
+    fn git_output(&self, args: &[&str]) -> Output {
+        run_git(&self.worktree, &self.global_git_config, args)
+    }
+}
+
+fn assert_git_success(cwd: &Path, global_git_config: &Path, args: &[&str]) -> Output {
+    let output = run_git(cwd, global_git_config, args);
+    if !output.status.success() {
+        panic!(
+            "git {} failed\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    output
+}
+
+fn run_git(cwd: &Path, global_git_config: &Path, args: &[&str]) -> Output {
+    StdCommand::new("git")
+        .current_dir(cwd)
+        .env("GIT_CONFIG_GLOBAL", global_git_config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .args(args)
+        .output()
+        .expect("git command should run")
+}
+
+fn trimmed_stdout(stdout: Vec<u8>) -> String {
+    String::from_utf8(stdout)
+        .expect("git stdout should be UTF-8")
+        .trim()
+        .to_string()
 }
