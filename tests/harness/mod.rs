@@ -246,6 +246,15 @@ fi
 if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
   ancestor="${3:-}"
   descendant="${4:-}"
+  if [[ "${STCK_TEST_STALE_LOCAL_PARENT:-}" != "" && "${ancestor}" == "refs/heads/${STCK_TEST_STALE_LOCAL_PARENT}" ]]; then
+    exit 1
+  fi
+  if [[ "${STCK_TEST_MISSING_LOCAL_BRANCH_REF:-}" != "" && ( "${ancestor}" == "refs/heads/${STCK_TEST_MISSING_LOCAL_BRANCH_REF}" || "${descendant}" == "refs/heads/${STCK_TEST_MISSING_LOCAL_BRANCH_REF}" ) ]]; then
+    exit 128
+  fi
+  if [[ "${STCK_TEST_MISSING_REMOTE_BRANCH:-}" != "" && ( "${ancestor}" == "refs/remotes/origin/${STCK_TEST_MISSING_REMOTE_BRANCH}" || "${descendant}" == "refs/remotes/origin/${STCK_TEST_MISSING_REMOTE_BRANCH}" ) ]]; then
+    exit 128
+  fi
   if [[ "${STCK_TEST_DEFAULT_ADVANCED:-0}" == "1" && "${ancestor}" == "refs/remotes/origin/main" && "${descendant}" == "refs/heads/feature-base" ]]; then
     exit 1
   fi
@@ -253,6 +262,10 @@ if [[ "${1:-}" == "merge-base" && "${2:-}" == "--is-ancestor" ]]; then
   ancestor_branch="${ancestor_branch#refs/remotes/origin/}"
   descendant_branch="${descendant#refs/heads/}"
   descendant_branch="${descendant_branch#refs/remotes/origin/}"
+
+  if [[ ",${STCK_TEST_ANCESTRY_ERROR_PAIRS:-}," == *",${ancestor_branch}:${descendant_branch},"* ]]; then
+    exit 128
+  fi
 
   if [[ -n "${STCK_TEST_NOT_ANCESTOR_PAIRS:-}" ]]; then
     IFS=',' read -ra pairs <<< "${STCK_TEST_NOT_ANCESTOR_PAIRS}"
@@ -752,6 +765,10 @@ exit 1
         self.git_success(&["checkout", branch]);
     }
 
+    pub fn delete_local_branch(&self, branch: &str) {
+        self.git_success(&["branch", "-d", branch]);
+    }
+
     pub fn commit_file(&self, relative_path: &str, contents: &str, message: &str) {
         let path = self.worktree.join(relative_path);
         if let Some(parent) = path.parent() {
@@ -818,6 +835,11 @@ exit 1
             json,
         )
         .expect("gh children response should be written");
+    }
+
+    pub fn write_open_prs_response(&self, json: &str) {
+        fs::write(self.gh_responses.join("pr-list-open.json"), json)
+            .expect("gh open PR response should be written");
     }
 
     pub fn gh_log(&self) -> String {

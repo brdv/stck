@@ -200,14 +200,13 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
         };
 
         if !current_has_pr {
-            let bootstrap_base =
-                match discover_parent_base(current_branch, &preflight.default_branch) {
-                    Ok(base) => base,
-                    Err(message) => {
-                        eprintln!("error: {message}");
-                        return ExitCode::from(1);
-                    }
-                };
+            let bootstrap_base = match discover_parent_base(current_branch) {
+                Ok(base) => base.unwrap_or_else(|| preflight.default_branch.clone()),
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
             println!(
                 "$ gh pr create --base {} --head {} --title {} --body \"\"",
                 bootstrap_base, current_branch, current_branch
@@ -263,38 +262,49 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
     ExitCode::SUCCESS
 }
 
-/// Discover the intended PR base for a branch by looking for its parent in the open stack.
-fn discover_parent_base(branch: &str, default_branch: &str) -> Result<String, String> {
-    let prs = github::list_open_prs().map_err(|message| {
-        format!(
-            "could not auto-detect stack parent for {branch}: {message}; retry or pass `--base <branch>` explicitly"
-        )
-    })?;
+fn parent_discovery_error(branch: &str, message: &str) -> String {
+    format!(
+        "could not auto-detect stack parent for {branch}: {message}; retry or pass `--base <branch>` explicitly"
+    )
+}
+
+/// Discover the intended PR parent from open PR metadata and Git ancestry.
+///
+/// `Ok(None)` means discovery completed and no parent is an ancestor. Any
+/// GitHub, ref-resolution, or ancestry-check failure is returned separately so
+/// callers cannot silently create a PR against the default branch.
+fn discover_parent_base(branch: &str) -> Result<Option<String>, String> {
+    let candidate_branches = github::list_open_pr_head_branches()
+        .map_err(|message| parent_discovery_error(branch, &message))?;
+    gitops::fetch_origin().map_err(|message| parent_discovery_error(branch, &message))?;
 
     let branch_ref = format!("refs/heads/{branch}");
-    let mut best: Option<&str> = None;
+    let mut best: Option<(String, String)> = None;
 
-    for pr in &prs {
-        if pr.head_ref_name == branch || pr.head_ref_name == default_branch {
+    for candidate in candidate_branches {
+        if candidate == branch {
             continue;
         }
-        if pr.state != github::PrState::Open {
-            continue;
-        }
-        let candidate_ref = format!("refs/heads/{}", pr.head_ref_name);
-        if gitops::is_ancestor(&candidate_ref, &branch_ref).unwrap_or(false) {
-            if let Some(current_best) = best {
-                let current_best_ref = format!("refs/heads/{current_best}");
-                if gitops::is_ancestor(&current_best_ref, &candidate_ref).unwrap_or(false) {
-                    best = Some(&pr.head_ref_name);
+
+        let candidate_ref = gitops::resolve_branch_ref_remote_first(&candidate)
+            .map_err(|message| parent_discovery_error(branch, &message))?;
+        let is_ancestor = gitops::is_ancestor(&candidate_ref, &branch_ref)
+            .map_err(|message| parent_discovery_error(branch, &message))?;
+
+        if is_ancestor {
+            if let Some((_, current_best_ref)) = &best {
+                let is_closer_parent = gitops::is_ancestor(current_best_ref, &candidate_ref)
+                    .map_err(|message| parent_discovery_error(branch, &message))?;
+                if is_closer_parent {
+                    best = Some((candidate, candidate_ref));
                 }
             } else {
-                best = Some(&pr.head_ref_name);
+                best = Some((candidate, candidate_ref));
             }
         }
     }
 
-    Ok(best.unwrap_or(default_branch).to_string())
+    Ok(best.map(|(branch, _)| branch))
 }
 
 /// Create a pull request for the current branch if one does not already exist.
@@ -357,8 +367,8 @@ pub(crate) fn run_submit(
     let base = if let Some(explicit) = base_override {
         explicit
     } else {
-        discovered_base = match discover_parent_base(current_branch, &preflight.default_branch) {
-            Ok(base) => base,
+        discovered_base = match discover_parent_base(current_branch) {
+            Ok(base) => base.unwrap_or_else(|| preflight.default_branch.clone()),
             Err(message) => {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);

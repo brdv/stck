@@ -73,8 +73,8 @@ stck submit --base feature-a
 `submit` creates a PR for the current branch when one does not exist.
 
 - If no `--base` is provided, `stck` first tries to auto-detect the stack parent from open PR metadata.
-- If discovery succeeds but finds no parent PR, `stck` falls back to the repository default branch.
-- If GitHub lookup fails, `stck` errors and tells you to retry or pass `--base <branch>` explicitly.
+- If discovery checks every available candidate and finds no parent PR, `stck` falls back to the repository default branch.
+- If GitHub lookup, ref resolution, or an ancestry check fails, `stck` errors and tells you to retry or pass `--base <branch>` explicitly.
 - Parent auto-discovery currently inspects up to the first 100 open PRs, so `--base` is the reliable override in larger repositories.
 - Use `--base` any time you want to target a stack parent branch explicitly.
 - If the current branch already has a PR, it reports a no-op.

@@ -115,6 +115,30 @@ fn new_from_stacked_branch_discovers_parent_base() {
 }
 
 #[test]
+fn new_prefers_remote_parent_when_local_parent_has_drifted() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-new-remote-parent.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_NEW_BRANCH_HAS_COMMITS", "1");
+    cmd.env("STCK_TEST_STALE_LOCAL_PARENT", "feature-base");
+    cmd.env(
+        "STCK_TEST_OPEN_PRS_JSON",
+        r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#,
+    );
+    cmd.args(["new", "feature-next"]);
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "$ gh pr create --base feature-base --head feature-branch",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("new log should exist");
+    assert!(
+        log.contains("pr create --base feature-base --head feature-branch"),
+        "bootstrap PR should use the remote parent when its local ref has drifted"
+    );
+}
+
+#[test]
 fn new_fails_when_parent_discovery_errors() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.env("STCK_TEST_PR_LIST_FAIL", "1");
