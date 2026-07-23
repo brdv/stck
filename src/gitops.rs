@@ -274,10 +274,21 @@ pub fn push_branch(branch: &str) -> Result<(), String> {
     }
 }
 
-/// Push `branch` to `origin` with `--force-with-lease`.
-pub fn push_force_with_lease(branch: &str) -> Result<(), String> {
+/// Push `branch` to `origin` with an explicit expected remote branch tip.
+///
+/// `None` means the remote branch must still be absent. Pinning the lease to a
+/// specific expected state prevents an intervening fetch from weakening the
+/// overwrite protection.
+pub fn push_force_with_lease(
+    branch: &str,
+    expected_remote_head: Option<&str>,
+) -> Result<(), String> {
+    let lease = format!(
+        "--force-with-lease=refs/heads/{branch}:{}",
+        expected_remote_head.unwrap_or_default()
+    );
     let status = Command::new("git")
-        .args(["push", "--force-with-lease", "origin", branch])
+        .args(["push", &lease, "origin", branch])
         .stderr(Stdio::inherit())
         .status()
         .map_err(|_| "failed to run `git push`; ensure this is a git repository".to_string())?;
@@ -318,6 +329,15 @@ pub fn local_branch_exists(branch: &str) -> Result<bool, String> {
 /// Return whether `origin/<branch>` exists locally.
 pub fn remote_branch_exists(branch: &str) -> Result<bool, String> {
     ref_exists(&format!("refs/remotes/origin/{branch}"))
+}
+
+/// Resolve the fetched `origin/<branch>` tip, or return `None` when absent.
+pub fn remote_branch_head(branch: &str) -> Result<Option<String>, String> {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    if !ref_exists(&remote_ref)? {
+        return Ok(None);
+    }
+    resolve_ref(&remote_ref).map(Some)
 }
 
 /// Push `branch` to `origin` and configure it as the upstream branch.

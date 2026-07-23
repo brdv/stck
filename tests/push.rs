@@ -18,10 +18,10 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ git push --force-with-lease origin feature-branch",
+            "$ git push --force-with-lease=refs/heads/feature-branch:ffffffffffffffffffffffffffffffffffffffff origin feature-branch",
         ))
         .stdout(predicate::str::contains(
-            "$ git push --force-with-lease origin feature-child",
+            "$ git push --force-with-lease=refs/heads/feature-child:ffffffffffffffffffffffffffffffffffffffff origin feature-child",
         ))
         .stdout(predicate::str::contains(
             "$ gh pr edit feature-branch --base main",
@@ -33,7 +33,7 @@ fn push_executes_pushes_before_retargets_and_prints_summary() {
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
     let push_idx = log
-        .find("push --force-with-lease origin feature-child")
+        .find("push --force-with-lease=refs/heads/feature-child:ffffffffffffffffffffffffffffffffffffffff origin feature-child")
         .expect("second push command missing");
     let retarget_idx = log
         .find("pr edit feature-branch --base main")
@@ -138,8 +138,8 @@ fn push_resumes_after_partial_retarget_failure() {
         ));
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
-    let push_a = "push --force-with-lease origin feature-branch";
-    let push_b = "push --force-with-lease origin feature-child";
+    let push_a = "push --force-with-lease=refs/heads/feature-branch:ffffffffffffffffffffffffffffffffffffffff origin feature-branch";
+    let push_b = "push --force-with-lease=refs/heads/feature-child:ffffffffffffffffffffffffffffffffffffffff origin feature-child";
     let retarget_a = "pr edit feature-branch --base main";
     let retarget_b = "pr edit feature-child --base feature-branch";
     assert_eq!(log.matches(push_a).count(), 1);
@@ -343,7 +343,7 @@ fn push_publishes_a_branch_when_its_remote_ref_is_missing() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ git push --force-with-lease origin feature-child",
+            "$ git push --force-with-lease=refs/heads/feature-child: origin feature-child",
         ))
         .stdout(predicate::str::contains(
             "Push succeeded. Pushed 1 branch(es) and applied 0 PR base update(s) in this run.",
@@ -351,7 +351,7 @@ fn push_publishes_a_branch_when_its_remote_ref_is_missing() {
 
     let log = fs::read_to_string(&log_path).expect("push log should exist");
     assert!(
-        log.contains("push --force-with-lease origin feature-child"),
+        log.contains("push --force-with-lease=refs/heads/feature-child: origin feature-child"),
         "push should publish a branch whose remote ref is absent"
     );
 }
@@ -375,7 +375,7 @@ fn push_fails_closed_when_remote_ref_lookup_errors() {
 
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
-        !log.contains("push --force-with-lease origin feature-child"),
+        !log.contains("push --force-with-lease"),
         "push must not treat a ref lookup failure as a missing remote branch"
     );
 }
@@ -399,10 +399,20 @@ fn sync_then_push_after_squash_merge_produces_correct_retargets() {
         "STCK_TEST_NEEDS_PUSH_BRANCHES",
         "feature-branch,feature-child",
     );
+    push.env(
+        "STCK_TEST_NOT_ANCESTOR_PAIRS",
+        "feature-branch:feature-branch,feature-child:feature-child",
+    );
     push.arg("push");
 
     push.assert()
         .success()
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease=refs/heads/feature-branch:ffffffffffffffffffffffffffffffffffffffff origin feature-branch",
+        ))
+        .stdout(predicate::str::contains(
+            "$ git push --force-with-lease=refs/heads/feature-child:ffffffffffffffffffffffffffffffffffffffff origin feature-child",
+        ))
         .stdout(predicate::str::contains(
             "$ gh pr edit feature-branch --base main",
         ))
@@ -410,6 +420,53 @@ fn sync_then_push_after_squash_merge_produces_correct_retargets() {
         .stdout(predicate::str::contains(
             "Push succeeded. Pushed 2 branch(es) and applied 1 PR base update(s) in this run.",
         ));
+}
+
+#[test]
+fn push_aborts_when_a_remote_branch_changes_after_sync() {
+    let (temp, mut sync) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "sync-push-remote-drift.log");
+
+    sync.env("STCK_TEST_LOG", log_path.as_os_str());
+    sync.env("STCK_TEST_NEEDS_PUSH_BRANCH", "feature-branch");
+    sync.arg("sync");
+    sync.assert().success();
+
+    let mut push = stck_cmd_for_temp(&temp);
+    push.env("STCK_TEST_LOG", log_path.as_os_str());
+    push.env(
+        "STCK_TEST_FEATURE_BRANCH_HEAD",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    push.arg("push");
+
+    push.assert().code(1).stderr(predicate::str::contains(
+        "error: remote branch `origin/feature-branch` changed since sync; expected ffffffffffffffffffffffffffffffffffffffff, found 2222222222222222222222222222222222222222; integrate the remote changes locally, then rerun `stck sync` before pushing",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("push log should exist");
+    assert!(
+        !log.contains("push --force-with-lease"),
+        "push must not overwrite a remote branch that changed after sync"
+    );
+    assert!(
+        !temp
+            .path()
+            .join("git-dir")
+            .join("stck")
+            .join("last-plan.json")
+            .exists(),
+        "remote drift should clear push state so sync can be recomputed"
+    );
+    assert!(
+        !temp
+            .path()
+            .join("git-dir")
+            .join("stck")
+            .join("last-sync-plan.json")
+            .exists(),
+        "remote drift should clear the stale cached sync plan"
+    );
 }
 
 #[test]
@@ -434,7 +491,7 @@ fn push_aborts_when_remote_has_commits_not_in_local_branch() {
     if log_path.exists() {
         let log = fs::read_to_string(&log_path).expect("push log should be readable");
         assert!(
-            !log.contains("push --force-with-lease origin feature-branch"),
+            !log.contains("push --force-with-lease"),
             "push should not force-push a branch whose remote has diverged"
         );
     }

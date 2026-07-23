@@ -333,7 +333,7 @@ if [[ "${1:-}" == "rebase" && "${2:-}" == "--onto" ]]; then
   exit 0
 fi
 
-if [[ "${1:-}" == "push" && "${2:-}" == "--force-with-lease" && "${3:-}" == "origin" ]]; then
+if [[ "${1:-}" == "push" && "${2:-}" == --force-with-lease=* && "${3:-}" == "origin" ]]; then
   branch="${4:-}"
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
