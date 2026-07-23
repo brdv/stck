@@ -216,21 +216,22 @@ fn markdown_code_span(value: &str) -> String {
     format!("{fence}{value}{fence}")
 }
 
-/// List same-repository head branches for open pull requests.
+/// Return whether `branch` is the head of an open same-repository pull request.
 ///
-/// This currently relies on `gh pr list --limit 100`, so callers should treat
-/// it as a best-effort discovery source rather than a complete repository-wide
-/// index in very large repositories. Cross-repository pull requests are
-/// excluded because their head branches are not available through `origin`.
-pub fn list_open_pr_head_branches() -> Result<Vec<String>, String> {
+/// This uses a targeted query so parent discovery does not depend on a bounded
+/// repository-wide PR listing. Cross-repository results are excluded because
+/// their head branches are not available through `origin`.
+pub fn has_open_pr_for_head(branch: &str) -> Result<bool, String> {
     let output = Command::new("gh")
         .args([
             "pr",
             "list",
+            "--head",
+            branch,
             "--state",
             "open",
             "--limit",
-            "100",
+            "1",
             "--json",
             "headRefName,isCrossRepository",
         ])
@@ -239,7 +240,7 @@ pub fn list_open_pr_head_branches() -> Result<Vec<String>, String> {
 
     if !output.status.success() {
         return Err(with_stderr(
-            "failed to list open pull requests from GitHub",
+            &format!("failed to query open pull request for branch {branch}"),
             &output.stderr,
         ));
     }
@@ -247,10 +248,8 @@ pub fn list_open_pr_head_branches() -> Result<Vec<String>, String> {
     let prs = serde_json::from_slice::<Vec<OpenPullRequestHead>>(&output.stdout)
         .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())?;
     Ok(prs
-        .into_iter()
-        .filter(|pr| !pr.is_cross_repository)
-        .map(|pr| pr.head_ref_name)
-        .collect())
+        .iter()
+        .any(|pr| !pr.is_cross_repository && pr.head_ref_name == branch))
 }
 
 fn fetch_pr_for_branch(branch: &str) -> Result<PullRequest, String> {

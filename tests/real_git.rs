@@ -71,7 +71,10 @@ fn submit_discovers_a_remote_parent_without_its_local_branch() {
     repo.create_branch("feature-child");
     repo.commit_file("child.txt", "child\n", "Add child feature");
     repo.delete_local_branch("feature-base");
-    repo.write_open_prs_response(r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#);
+    repo.write_open_pr_head_response(
+        "feature-base",
+        r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#,
+    );
 
     let mut cmd = repo.stck_cmd();
     cmd.arg("submit");
@@ -86,7 +89,13 @@ fn submit_discovers_a_remote_parent_without_its_local_branch() {
         ));
 
     let gh_log = repo.gh_log();
-    assert!(gh_log.contains("pr list --state open --limit 100"));
+    assert!(gh_log.contains(
+        "pr list --head feature-base --state open --limit 1 --json headRefName,isCrossRepository"
+    ));
+    assert!(
+        !gh_log.contains("pr list --state open --limit 100"),
+        "parent discovery must not depend on a bounded repository-wide PR scan"
+    );
     assert!(gh_log.contains("pr create --base feature-base --head feature-child"));
     assert!(gh_log.contains(
         "This pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** `feature-base`"
