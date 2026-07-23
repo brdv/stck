@@ -208,10 +208,12 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
                 }
             };
             println!(
-                "$ gh pr create --base {} --head {} --title {} --body \"\"",
+                "$ gh pr create --base {} --head {} --title {} --body \"<stack context>\"",
                 bootstrap_base, current_branch, current_branch
             );
-            if let Err(message) = github::create_pr(&bootstrap_base, current_branch, current_branch)
+            let body = github::stack_pr_body(&bootstrap_base, &preflight.default_branch);
+            if let Err(message) =
+                github::create_pr(&bootstrap_base, current_branch, current_branch, &body)
             {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
@@ -247,10 +249,11 @@ pub(crate) fn run_new(preflight: &env::PreflightContext, new_branch: &str) -> Ex
     }
 
     println!(
-        "$ gh pr create --base {} --head {} --title {} --body \"\"",
+        "$ gh pr create --base {} --head {} --title {} --body \"<stack context>\"",
         pr_base_branch, new_branch, new_branch
     );
-    if let Err(message) = github::create_pr(pr_base_branch, new_branch, new_branch) {
+    let body = github::stack_pr_body(pr_base_branch, &preflight.default_branch);
+    if let Err(message) = github::create_pr(pr_base_branch, new_branch, new_branch, &body) {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
@@ -389,10 +392,11 @@ pub(crate) fn run_submit(
     };
 
     println!(
-        "$ gh pr create --base {} --head {} --title {} --body \"\"",
+        "$ gh pr create --base {} --head {} --title {} --body \"<stack context>\"",
         base, current_branch, current_branch
     );
-    if let Err(message) = github::create_pr(base, current_branch, current_branch) {
+    let body = github::stack_pr_body(base, &preflight.default_branch);
+    if let Err(message) = github::create_pr(base, current_branch, current_branch, &body) {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
