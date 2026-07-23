@@ -431,6 +431,10 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
     echo "$*" >> "${STCK_TEST_LOG}"
   fi
+  if [[ "${STCK_TEST_PR_VIEW_ERROR:-0}" == "1" ]]; then
+    echo "network unavailable" >&2
+    exit 1
+  fi
   if [[ "${STCK_TEST_PR_LIST_FAIL:-0}" == "1" ]]; then
     echo "failed to list pull requests" >&2
     exit 1
@@ -453,6 +457,11 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
       pr_list_head="${!next}"
     fi
   done
+
+  if [[ -n "${STCK_TEST_PR_LIST_FAIL_HEAD:-}" && "${pr_list_head}" == "${STCK_TEST_PR_LIST_FAIL_HEAD}" ]]; then
+    echo "failed to list pull requests" >&2
+    exit 1
+  fi
 
   if [[ -n "${pr_list_base}" ]]; then
     if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" && "${pr_list_base}" == "feature-branch" ]]; then
@@ -480,12 +489,58 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
     exit 0
   fi
 
-  if [[ -n "${pr_list_head}" && "${pr_list_state}" == "open" ]]; then
-    if [[ -n "${STCK_TEST_OPEN_PRS_JSON:-}" ]]; then
-      echo "${STCK_TEST_OPEN_PRS_JSON}"
-    else
-      echo '[]'
+  if [[ -n "${pr_list_head}" ]]; then
+    if [[ "${pr_list_state}" == "open" ]]; then
+      if [[ "${STCK_TEST_HAS_CURRENT_PR:-0}" == "1" && "${pr_list_head}" == "feature-branch" ]]; then
+        echo '[{"headRefName":"feature-branch","isCrossRepository":false}]'
+      elif [[ -n "${STCK_TEST_OPEN_PRS_JSON:-}" ]]; then
+        echo "${STCK_TEST_OPEN_PRS_JSON}"
+      else
+        echo '[]'
+      fi
+      exit 0
     fi
+
+    if [[ "${STCK_TEST_MISSING_CURRENT_PR:-0}" == "1" && "${pr_list_head}" == "feature-branch" ]]; then
+      echo '[]'
+      exit 0
+    fi
+
+    if [[ -n "${STCK_TEST_FEATURE_BRANCH_BASE:-}" && "${pr_list_head}" == "feature-branch" ]]; then
+      echo "[{\"number\":101,\"headRefName\":\"feature-branch\",\"baseRefName\":\"${STCK_TEST_FEATURE_BRANCH_BASE}\",\"state\":\"OPEN\",\"isCrossRepository\":false}]"
+      exit 0
+    fi
+
+    if [[ -n "${STCK_TEST_FEATURE_CHILD_BASE:-}" && "${pr_list_head}" == "feature-child" ]]; then
+      echo "[{\"number\":102,\"headRefName\":\"feature-child\",\"baseRefName\":\"${STCK_TEST_FEATURE_CHILD_BASE}\",\"state\":\"OPEN\",\"isCrossRepository\":false}]"
+      exit 0
+    fi
+
+    if [[ "${STCK_TEST_NON_LINEAR:-0}" == "1" ]]; then
+      case "${pr_list_head}" in
+        feature-base) echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","isCrossRepository":false}]' ;;
+        feature-branch) echo '[{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","isCrossRepository":false}]' ;;
+        *) echo '[]' ;;
+      esac
+      exit 0
+    fi
+
+    if [[ "${STCK_TEST_SYNC_NOOP:-0}" == "1" ]]; then
+      case "${pr_list_head}" in
+        feature-base) echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"OPEN","isCrossRepository":false}]' ;;
+        feature-branch) echo '[{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","isCrossRepository":false}]' ;;
+        feature-child) echo '[{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","isCrossRepository":false}]' ;;
+        *) echo '[]' ;;
+      esac
+      exit 0
+    fi
+
+    case "${pr_list_head}" in
+      feature-base) echo '[{"number":100,"headRefName":"feature-base","baseRefName":"main","state":"MERGED","isCrossRepository":false}]' ;;
+      feature-branch) echo '[{"number":101,"headRefName":"feature-branch","baseRefName":"feature-base","state":"OPEN","isCrossRepository":false}]' ;;
+      feature-child) echo '[{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN","isCrossRepository":false}]' ;;
+      *) echo '[]' ;;
+    esac
     exit 0
   fi
 
@@ -692,17 +747,19 @@ fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   base=""
   head=""
+  state="all"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --base) base="${2:-}"; shift 2 ;;
       --head) head="${2:-}"; shift 2 ;;
+      --state) state="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
 
   if [[ -n "${head}" ]]; then
     safe_head="${head//\//__}"
-    response="${STCK_REAL_GH_RESPONSES}/pr-list-head-${safe_head}.json"
+    response="${STCK_REAL_GH_RESPONSES}/pr-list-head-${state}-${safe_head}.json"
   elif [[ -n "${base}" ]]; then
     safe_base="${base//\//__}"
     response="${STCK_REAL_GH_RESPONSES}/pr-list-base-${safe_base}.json"
@@ -866,6 +923,20 @@ exit 1
             json,
         )
         .expect("gh PR response should be written");
+        fs::write(
+            self.gh_responses
+                .join(format!("pr-list-head-all-{branch}.json")),
+            format!("[{json}]"),
+        )
+        .expect("gh all-state head response should be written");
+        if json.contains(r#""state":"OPEN""#) {
+            fs::write(
+                self.gh_responses
+                    .join(format!("pr-list-head-open-{branch}.json")),
+                format!("[{json}]"),
+            )
+            .expect("gh open-state head response should be written");
+        }
     }
 
     pub fn write_children_response(&self, base: &str, json: &str) {
@@ -880,7 +951,8 @@ exit 1
     pub fn write_open_pr_head_response(&self, head: &str, json: &str) {
         let head = head.replace('/', "__");
         fs::write(
-            self.gh_responses.join(format!("pr-list-head-{head}.json")),
+            self.gh_responses
+                .join(format!("pr-list-head-open-{head}.json")),
             json,
         )
         .expect("gh head response should be written");

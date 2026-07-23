@@ -295,7 +295,7 @@ fn discover_parent_base(branch: &str) -> Result<Option<String>, String> {
             .map_err(|message| parent_discovery_error(branch, &message))?;
 
         if is_ancestor
-            && github::has_open_pr_for_head(&candidate)
+            && github::pr_exists_for_head(&candidate)
                 .map_err(|message| parent_discovery_error(branch, &message))?
         {
             if let Some((_, current_best_ref)) = &best {

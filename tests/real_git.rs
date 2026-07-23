@@ -54,7 +54,9 @@ fn submit_pushes_a_real_branch_before_creating_its_pr() {
         repo.remote_sha("feature-submit")
     );
     let gh_log = repo.gh_log();
-    assert!(gh_log.contains("pr view feature-submit --json number"));
+    assert!(gh_log.contains(
+        "pr list --head feature-submit --state open --limit 100 --json headRefName,isCrossRepository"
+    ));
     assert!(gh_log.contains("pr create --base main --head feature-submit"));
     assert!(gh_log.contains(
         "This pull request is part of a stack.\n\n- **Position:** Root\n- **Base:** `main`"
@@ -90,7 +92,7 @@ fn submit_discovers_a_remote_parent_without_its_local_branch() {
 
     let gh_log = repo.gh_log();
     assert!(gh_log.contains(
-        "pr list --head feature-base --state open --limit 1 --json headRefName,isCrossRepository"
+        "pr list --head feature-base --state open --limit 100 --json headRefName,isCrossRepository"
     ));
     assert!(
         !gh_log.contains("pr list --state open --limit 100"),
