@@ -103,6 +103,11 @@ stck sync --continue
 stck sync --reset
 ```
 
+Finish or abort the native Git rebase before invoking the corresponding `stck`
+recovery command. A plain `stck sync` never skips a recorded failed step.
+See [`docs/sync-recovery.md`](./docs/sync-recovery.md) for the complete state
+and recovery contract.
+
 ### 4. Push rewritten branches and retarget PR bases
 
 ```bash
@@ -134,4 +139,4 @@ stck push
 
 - `stck` currently assumes a linear stack and fails fast for non-linear graphs.
 - Parent auto-discovery for `new`/`submit` checks fetched `origin` branches and queries GitHub only for ancestor candidates, avoiding a repository-wide PR result limit.
-- If a rebase conflict happens during `sync`, resolve conflicts with normal Git workflow, then continue and rerun `stck sync` as needed.
+- If a rebase conflict happens during `sync`, finish it with `git rebase --continue`, then run `stck sync --continue`; to start over, abort the Git rebase first and run `stck sync --reset`.
