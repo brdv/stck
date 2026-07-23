@@ -114,3 +114,71 @@ fn sync_rebases_a_real_linear_stack_after_main_advances() {
     assert_eq!(repo.remote_sha("feature-base"), old_base_sha);
     assert_eq!(repo.remote_sha("feature-child"), old_child_sha);
 }
+
+#[test]
+fn push_does_not_reuse_a_real_cached_plan_for_another_stack() {
+    let repo = RealGitRepo::new();
+
+    repo.create_branch("stack-a-base");
+    repo.commit_file("stack-a-base.txt", "base a\n", "Add stack A base");
+    repo.push("stack-a-base");
+    repo.create_branch("stack-a-child");
+    repo.commit_file("stack-a-child.txt", "child a\n", "Add stack A child");
+    repo.push("stack-a-child");
+
+    repo.checkout("main");
+    repo.commit_file("main-ahead.txt", "main ahead\n", "Advance main");
+    repo.push("main");
+    repo.checkout("stack-a-base");
+
+    repo.write_pr_response(
+        "stack-a-base",
+        r#"{"number":201,"headRefName":"stack-a-base","baseRefName":"main","state":"OPEN"}"#,
+    );
+    repo.write_pr_response(
+        "stack-a-child",
+        r#"{"number":202,"headRefName":"stack-a-child","baseRefName":"stack-a-base","state":"OPEN"}"#,
+    );
+    repo.write_children_response(
+        "stack-a-base",
+        r#"[{"number":202,"headRefName":"stack-a-child","baseRefName":"stack-a-base","state":"OPEN"}]"#,
+    );
+    repo.write_children_response("stack-a-child", "[]");
+
+    let mut sync = repo.stck_cmd();
+    sync.arg("sync");
+    sync.assert().success();
+
+    repo.checkout("main");
+    repo.create_branch("stack-b-base");
+    repo.commit_file("stack-b-base.txt", "base b\n", "Add stack B base");
+    repo.push("stack-b-base");
+    repo.create_branch("stack-b-child");
+    repo.commit_file("stack-b-child.txt", "child b\n", "Add stack B child");
+    repo.push("stack-b-child");
+
+    repo.write_pr_response(
+        "stack-b-base",
+        r#"{"number":301,"headRefName":"stack-b-base","baseRefName":"main","state":"OPEN"}"#,
+    );
+    repo.write_pr_response(
+        "stack-b-child",
+        r#"{"number":302,"headRefName":"stack-b-child","baseRefName":"stack-b-base","state":"OPEN"}"#,
+    );
+    repo.write_children_response("stack-b-child", "[]");
+
+    let mut push = repo.stck_cmd();
+    push.arg("push");
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 0 branch(es) and applied 0 PR base update(s) in this run.",
+        ))
+        .stdout(predicate::str::contains("$ gh pr edit").not());
+
+    let gh_log = repo.gh_log();
+    assert!(
+        !gh_log.contains("pr edit stack-a-base") && !gh_log.contains("pr edit stack-a-child"),
+        "push for stack B must not apply stack A's cached retarget plan"
+    );
+}

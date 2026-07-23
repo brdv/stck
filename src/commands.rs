@@ -6,7 +6,7 @@ use crate::env;
 use crate::github;
 use crate::gitops;
 use crate::stack;
-use crate::sync_state::{self, LastSyncPlan, PushState, SyncState};
+use crate::sync_state::{self, LastSyncPlan, PushState, SyncPlanScope, SyncState};
 
 /// Print the detected stack, its PR state, and any local follow-up actions.
 pub(crate) fn run_status(preflight: &env::PreflightContext) -> ExitCode {
@@ -490,6 +490,10 @@ pub(crate) fn run_sync(
                 force_rewrite_first_open,
             );
             if steps.is_empty() {
+                if let Err(message) = sync_state::clear_last_sync_plan() {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
                 println!("Stack is already up to date. No sync needed.");
                 return ExitCode::SUCCESS;
             }
@@ -499,6 +503,7 @@ pub(crate) fn run_sync(
                 completed_steps: 0,
                 failed_step: None,
                 failed_step_branch_head: None,
+                plan_scope: Some(SyncPlanScope::new(&preflight.repository, &stack)),
             };
             if let Err(message) = sync_state::save_sync(&state) {
                 eprintln!("error: {message}");
@@ -660,18 +665,24 @@ pub(crate) fn run_sync(
         return ExitCode::from(1);
     }
 
-    let last_plan = LastSyncPlan {
-        default_branch: preflight.default_branch.clone(),
-        retargets: state
-            .steps
-            .iter()
-            .map(|step| stack::RetargetStep {
-                branch: step.branch.clone(),
-                new_base_ref: step.new_base_ref.clone(),
-            })
-            .collect(),
-    };
-    if let Err(message) = sync_state::save_last_sync_plan(&last_plan) {
+    if let Some(scope) = state.plan_scope.clone() {
+        let last_plan = LastSyncPlan {
+            default_branch: preflight.default_branch.clone(),
+            scope: Some(scope),
+            retargets: state
+                .steps
+                .iter()
+                .map(|step| stack::RetargetStep {
+                    branch: step.branch.clone(),
+                    new_base_ref: step.new_base_ref.clone(),
+                })
+                .collect(),
+        };
+        if let Err(message) = sync_state::save_last_sync_plan(&last_plan) {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    } else if let Err(message) = sync_state::clear_last_sync_plan() {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
@@ -750,9 +761,13 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
                 }
             };
             let retargets = if let Some(plan) = cached_plan {
-                if plan.default_branch == preflight.default_branch {
+                if plan.matches(&preflight.repository, &preflight.default_branch, &stack) {
                     plan.retargets
                 } else {
+                    if let Err(message) = sync_state::clear_last_sync_plan() {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(1);
+                    }
                     stack::build_push_retargets(&stack, &preflight.default_branch)
                 }
             } else {

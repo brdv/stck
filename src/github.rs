@@ -1,12 +1,12 @@
 //! GitHub pull request discovery and mutation helpers backed by the `gh` CLI.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 
 use crate::util::with_stderr;
 
 /// The GitHub state of a pull request as returned by `gh`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PrState {
     /// The pull request is still open.
@@ -28,7 +28,7 @@ impl std::fmt::Display for PrState {
 }
 
 /// Minimal pull request metadata needed to reason about a linear stack.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PullRequest {
     /// The GitHub pull request number.
     pub number: u64,

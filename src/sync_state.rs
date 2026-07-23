@@ -1,5 +1,6 @@
 //! Persistence for resumable `sync` and `push` workflows under `.git/stck/`.
 
+use crate::github::PullRequest;
 use crate::gitops;
 use crate::stack::{RetargetStep, SyncStep};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,9 @@ pub struct SyncState {
     /// Recorded branch head after the failed step began, used to validate resume behavior.
     #[serde(default)]
     pub failed_step_branch_head: Option<String>,
+    /// Repository and PR stack the sync plan was computed for.
+    #[serde(default)]
+    pub(crate) plan_scope: Option<SyncPlanScope>,
 }
 
 /// Saved progress for an in-flight `stck push` operation.
@@ -38,8 +42,49 @@ pub struct PushState {
 pub struct LastSyncPlan {
     /// The default branch that the cached plan was built against.
     pub default_branch: String,
+    /// Repository and exact PR stack that produced the cached plan.
+    #[serde(default)]
+    pub(crate) scope: Option<SyncPlanScope>,
     /// PR retarget operations implied by the sync plan.
     pub retargets: Vec<RetargetStep>,
+}
+
+/// Identity required before a cached sync plan can be reused by `stck push`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SyncPlanScope {
+    repository: String,
+    stack: Vec<PullRequest>,
+}
+
+impl SyncPlanScope {
+    /// Capture the repository and exact ordered PR metadata for a sync plan.
+    pub(crate) fn new(repository: &str, stack: &[PullRequest]) -> Self {
+        Self {
+            repository: repository.to_string(),
+            stack: stack.to_vec(),
+        }
+    }
+
+    /// Return whether this scope still describes the current repository stack.
+    pub(crate) fn matches(&self, repository: &str, stack: &[PullRequest]) -> bool {
+        self.repository == repository && self.stack == stack
+    }
+}
+
+impl LastSyncPlan {
+    /// Return whether this cached plan is safe to reuse for the current stack.
+    pub(crate) fn matches(
+        &self,
+        repository: &str,
+        default_branch: &str,
+        stack: &[PullRequest],
+    ) -> bool {
+        self.default_branch == default_branch
+            && self
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.matches(repository, stack))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,7 +223,29 @@ fn save_raw_state(state: LastPlanState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::github::PrState;
     use crate::stack::{RetargetStep, SyncStep};
+
+    fn stack() -> Vec<PullRequest> {
+        vec![
+            PullRequest {
+                number: 101,
+                head_ref_name: "feature-b".to_string(),
+                base_ref_name: "main".to_string(),
+                state: PrState::Open,
+            },
+            PullRequest {
+                number: 102,
+                head_ref_name: "feature-c".to_string(),
+                base_ref_name: "feature-b".to_string(),
+                state: PrState::Open,
+            },
+        ]
+    }
+
+    fn scope() -> SyncPlanScope {
+        SyncPlanScope::new("example/stck", &stack())
+    }
 
     #[test]
     fn sync_state_round_trip() {
@@ -198,6 +265,7 @@ mod tests {
             completed_steps: 1,
             failed_step: Some(1),
             failed_step_branch_head: Some("abcd1234".to_string()),
+            plan_scope: Some(scope()),
         };
 
         let wrapped = LastPlanState::Sync(state.clone());
@@ -213,6 +281,7 @@ mod tests {
                 assert_eq!(s.completed_steps, 1);
                 assert_eq!(s.failed_step, Some(1));
                 assert_eq!(s.failed_step_branch_head, Some("abcd1234".to_string()));
+                assert_eq!(s.plan_scope, Some(scope()));
             }
             LastPlanState::Push(_) => panic!("expected Sync variant"),
         }
@@ -251,6 +320,7 @@ mod tests {
     fn last_sync_plan_round_trip() {
         let plan = LastSyncPlan {
             default_branch: "main".to_string(),
+            scope: Some(scope()),
             retargets: vec![
                 RetargetStep {
                     branch: "feature-b".to_string(),
@@ -268,6 +338,7 @@ mod tests {
             serde_json::from_slice(&json).expect("deserialize should succeed");
 
         assert_eq!(restored.default_branch, "main");
+        assert_eq!(restored.scope, Some(scope()));
         assert_eq!(restored.retargets.len(), 2);
         assert_eq!(restored.retargets[0].branch, "feature-b");
         assert_eq!(restored.retargets[1].new_base_ref, "feature-b");
@@ -280,6 +351,7 @@ mod tests {
             completed_steps: 0,
             failed_step: None,
             failed_step_branch_head: None,
+            plan_scope: Some(scope()),
         });
         let push = LastPlanState::Push(PushState {
             push_branches: vec![],
@@ -316,6 +388,7 @@ mod tests {
             completed_steps: 1,
             failed_step: None,
             failed_step_branch_head: None,
+            plan_scope: Some(scope()),
         };
 
         let wrapped = LastPlanState::Sync(state);
@@ -331,5 +404,38 @@ mod tests {
             }
             LastPlanState::Push(_) => panic!("expected Sync variant"),
         }
+    }
+
+    #[test]
+    fn last_sync_plan_matches_only_the_exact_repository_stack() {
+        let plan = LastSyncPlan {
+            default_branch: "main".to_string(),
+            scope: Some(scope()),
+            retargets: vec![],
+        };
+
+        assert!(plan.matches("example/stck", "main", &stack()));
+        assert!(!plan.matches("other/stck", "main", &stack()));
+        assert!(!plan.matches("example/stck", "trunk", &stack()));
+
+        let mut changed_stack = stack();
+        changed_stack[1].number = 999;
+        assert!(!plan.matches("example/stck", "main", &changed_stack));
+    }
+
+    #[test]
+    fn legacy_unscoped_last_sync_plan_is_not_reusable() {
+        let raw = r#"{
+  "default_branch": "main",
+  "retargets": [
+    {"branch": "feature-b", "new_base_ref": "main"}
+  ]
+}"#;
+
+        let plan: LastSyncPlan =
+            serde_json::from_str(raw).expect("legacy cached plan should remain readable");
+
+        assert_eq!(plan.scope, None);
+        assert!(!plan.matches("example/stck", "main", &stack()));
     }
 }
