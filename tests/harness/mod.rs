@@ -70,6 +70,19 @@ if [[ "${1:-}" == "fetch" && "${2:-}" == "origin" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "for-each-ref" && "${2:-}" == "--format=%(refname:strip=3)" && "${3:-}" == "refs/remotes/origin" ]]; then
+  if [[ "${STCK_TEST_LIST_ORIGIN_BRANCHES_FAIL:-0}" == "1" ]]; then
+    echo "failed to enumerate remote refs" >&2
+    exit 1
+  fi
+  if [[ -n "${STCK_TEST_ORIGIN_BRANCHES:-}" ]]; then
+    printf '%s\n' "${STCK_TEST_ORIGIN_BRANCHES}"
+  else
+    printf '%s\n' main feature-base feature-branch feature-child
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--verify" ]]; then
   ref="${3:-}"
 
@@ -415,6 +428,9 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
 fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
+  if [[ -n "${STCK_TEST_LOG:-}" ]]; then
+    echo "$*" >> "${STCK_TEST_LOG}"
+  fi
   if [[ "${STCK_TEST_PR_LIST_FAIL:-0}" == "1" ]]; then
     echo "failed to list pull requests" >&2
     exit 1
@@ -422,6 +438,7 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
 
   pr_list_state="all"
   pr_list_base=""
+  pr_list_head=""
   for ((i=1; i<=$#; i++)); do
     if [[ "${!i}" == "--state" ]]; then
       next=$((i+1))
@@ -430,6 +447,10 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
     if [[ "${!i}" == "--base" ]]; then
       next=$((i+1))
       pr_list_base="${!next}"
+    fi
+    if [[ "${!i}" == "--head" ]]; then
+      next=$((i+1))
+      pr_list_head="${!next}"
     fi
   done
 
@@ -456,6 +477,15 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
       feature-branch) echo '[{"number":102,"headRefName":"feature-child","baseRefName":"feature-branch","state":"OPEN"}]' ;;
       *) echo '[]' ;;
     esac
+    exit 0
+  fi
+
+  if [[ -n "${pr_list_head}" && "${pr_list_state}" == "open" ]]; then
+    if [[ -n "${STCK_TEST_OPEN_PRS_JSON:-}" ]]; then
+      echo "${STCK_TEST_OPEN_PRS_JSON}"
+    else
+      echo '[]'
+    fi
     exit 0
   fi
 
@@ -661,14 +691,19 @@ fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   base=""
+  head=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --base) base="${2:-}"; shift 2 ;;
+      --head) head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
 
-  if [[ -n "${base}" ]]; then
+  if [[ -n "${head}" ]]; then
+    safe_head="${head//\//__}"
+    response="${STCK_REAL_GH_RESPONSES}/pr-list-head-${safe_head}.json"
+  elif [[ -n "${base}" ]]; then
     safe_base="${base//\//__}"
     response="${STCK_REAL_GH_RESPONSES}/pr-list-base-${safe_base}.json"
   else
@@ -840,6 +875,15 @@ exit 1
             json,
         )
         .expect("gh children response should be written");
+    }
+
+    pub fn write_open_pr_head_response(&self, head: &str, json: &str) {
+        let head = head.replace('/', "__");
+        fs::write(
+            self.gh_responses.join(format!("pr-list-head-{head}.json")),
+            json,
+        )
+        .expect("gh head response should be written");
     }
 
     pub fn write_open_prs_response(&self, json: &str) {

@@ -277,9 +277,9 @@ fn parent_discovery_error(branch: &str, message: &str) -> String {
 /// GitHub, ref-resolution, or ancestry-check failure is returned separately so
 /// callers cannot silently create a PR against the default branch.
 fn discover_parent_base(branch: &str) -> Result<Option<String>, String> {
-    let candidate_branches = github::list_open_pr_head_branches()
-        .map_err(|message| parent_discovery_error(branch, &message))?;
     gitops::fetch_origin().map_err(|message| parent_discovery_error(branch, &message))?;
+    let candidate_branches = gitops::list_origin_branches()
+        .map_err(|message| parent_discovery_error(branch, &message))?;
 
     let branch_ref = format!("refs/heads/{branch}");
     let mut best: Option<(String, String)> = None;
@@ -294,7 +294,10 @@ fn discover_parent_base(branch: &str) -> Result<Option<String>, String> {
         let is_ancestor = gitops::is_ancestor(&candidate_ref, &branch_ref)
             .map_err(|message| parent_discovery_error(branch, &message))?;
 
-        if is_ancestor {
+        if is_ancestor
+            && github::has_open_pr_for_head(&candidate)
+                .map_err(|message| parent_discovery_error(branch, &message))?
+        {
             if let Some((_, current_best_ref)) = &best {
                 let is_closer_parent = gitops::is_ancestor(current_best_ref, &candidate_ref)
                     .map_err(|message| parent_discovery_error(branch, &message))?;

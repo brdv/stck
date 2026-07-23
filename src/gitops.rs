@@ -24,6 +24,37 @@ pub fn fetch_origin() -> Result<(), String> {
     }
 }
 
+/// List branch names advertised by the fetched `origin` remote.
+///
+/// The symbolic `origin/HEAD` ref is excluded because it is an alias for the
+/// default branch rather than a candidate stack branch.
+pub fn list_origin_branches() -> Result<Vec<String>, String> {
+    let output = Command::new("git")
+        .args([
+            "for-each-ref",
+            "--format=%(refname:strip=3)",
+            "refs/remotes/origin",
+        ])
+        .output()
+        .map_err(|_| "failed to run `git for-each-ref`".to_string())?;
+
+    if !output.status.success() {
+        return Err(with_stderr(
+            "failed to list branches from `origin`",
+            &output.stderr,
+        ));
+    }
+
+    let mut branches = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|branch| !branch.is_empty() && *branch != "HEAD")
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    branches.sort();
+    branches.dedup();
+    Ok(branches)
+}
+
 /// Return whether the local branch head differs from `origin/<branch>`.
 ///
 /// Missing remote refs are treated as needing a push so newly created branches

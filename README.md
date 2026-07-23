@@ -24,7 +24,7 @@ stck push
 
 `stck new <branch>` works both when starting from the default branch and when stacking on top of an existing branch.
 
-`stck submit` auto-detects the most likely stack parent when `--base` is omitted. If discovery can inspect every candidate but finds no parent PR, it falls back to the repository default branch. Missing refs or failed ancestry checks stop discovery instead of silently selecting the default branch. In larger repositories, discovery currently inspects up to the first 100 open PRs, so `--base <branch>` remains the reliable escape hatch.
+`stck submit` auto-detects the most likely stack parent when `--base` is omitted. It fetches `origin`, checks ancestor branch refs, and uses targeted GitHub queries to confirm open PRs without a repository-wide result limit. If discovery checks every candidate but finds no parent PR, it falls back to the repository default branch. Missing refs or failed ancestry checks stop discovery instead of silently selecting the default branch.
 
 PRs created by `new` or `submit` include a compact body identifying their root/child position and base branch.
 
