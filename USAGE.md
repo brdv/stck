@@ -60,7 +60,7 @@ stck new feature-b
   - current branch (normal stacked flow), or
   - default branch when starting a new stack from default branch.
 
-If the new branch has no commits beyond its base, `stck` does not create an empty PR and prints an explicit follow-up `gh pr create ...` command to run after adding commits.
+If the new branch has no commits beyond its base, `stck` does not create an empty PR and tells you to add commits, then run `stck submit --base <parent>`.
 
 ### 2b. Submit PR for current branch
 

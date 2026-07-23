@@ -26,7 +26,7 @@ enum Commands {
     },
     /// Create a PR for the current branch if missing.
     Submit {
-        /// Base branch for the PR (defaults to repository default branch).
+        /// Base branch for the PR (auto-detects the stack parent when omitted).
         #[arg(long)]
         base: Option<String>,
     },
