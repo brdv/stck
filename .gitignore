@@ -4,4 +4,4 @@
 debug/
 target/
 
-.claude/settings.local.json
+.claude
