@@ -33,12 +33,12 @@ fn new_bootstraps_current_branch_then_creates_stacked_branch_and_pr() {
         .success()
         .stdout(predicate::str::contains("$ git push -u origin feature-branch"))
         .stdout(predicate::str::contains(
-            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"\"",
+            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"<stack context>\"",
         ))
         .stdout(predicate::str::contains("$ git checkout -b feature-next"))
         .stdout(predicate::str::contains("$ git push -u origin feature-next"))
         .stdout(predicate::str::contains(
-            "$ gh pr create --base feature-branch --head feature-next --title feature-next --body \"\"",
+            "$ gh pr create --base feature-branch --head feature-next --title feature-next --body \"<stack context>\"",
         ))
         .stdout(predicate::str::contains(
             "Created branch feature-next and opened a stacked PR targeting feature-branch.",
@@ -165,7 +165,7 @@ fn new_from_default_branch_skips_default_branch_bootstrap() {
             "$ git push -u origin feature-next",
         ))
         .stdout(predicate::str::contains(
-            "$ gh pr create --base main --head feature-next --title feature-next --body \"\"",
+            "$ gh pr create --base main --head feature-next --title feature-next --body \"<stack context>\"",
         ))
         .stdout(predicate::str::contains(
             "Created branch feature-next and opened a stacked PR targeting main.",

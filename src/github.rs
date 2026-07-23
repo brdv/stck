@@ -174,11 +174,11 @@ pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
     }
 }
 
-/// Create a pull request with the given base, head, and title.
-pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
+/// Create a pull request with the given base, head, title, and body.
+pub fn create_pr(base: &str, head: &str, title: &str, body: &str) -> Result<(), String> {
     let output = Command::new("gh")
         .args([
-            "pr", "create", "--base", base, "--head", head, "--title", title, "--body", "",
+            "pr", "create", "--base", base, "--head", head, "--title", title, "--body", body,
         ])
         .output()
         .map_err(|_| "failed to run `gh pr create`; ensure GitHub CLI is installed".to_string())?;
@@ -191,6 +191,29 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
             &output.stderr,
         ))
     }
+}
+
+/// Build the deterministic stack context included in newly created PRs.
+pub fn stack_pr_body(base: &str, default_branch: &str) -> String {
+    let position = if base == default_branch {
+        "Root"
+    } else {
+        "Child"
+    };
+    let base = markdown_code_span(base);
+    format!(
+        "This pull request is part of a stack.\n\n- **Position:** {position}\n- **Base:** {base}"
+    )
+}
+
+fn markdown_code_span(value: &str) -> String {
+    let longest_run = value
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_run + 1);
+    format!("{fence}{value}{fence}")
 }
 
 /// List same-repository head branches for open pull requests.
@@ -387,7 +410,7 @@ pub fn build_linear_stack(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_linear_stack, PrState, PullRequest};
+    use super::{build_linear_stack, stack_pr_body, PrState, PullRequest};
 
     fn pr(number: u64, head: &str, base: &str) -> PullRequest {
         PullRequest {
@@ -396,6 +419,30 @@ mod tests {
             base_ref_name: base.to_string(),
             state: PrState::Open,
         }
+    }
+
+    #[test]
+    fn builds_root_pr_stack_context() {
+        assert_eq!(
+            stack_pr_body("main", "main"),
+            "This pull request is part of a stack.\n\n- **Position:** Root\n- **Base:** `main`"
+        );
+    }
+
+    #[test]
+    fn builds_child_pr_stack_context() {
+        assert_eq!(
+            stack_pr_body("feature-base", "main"),
+            "This pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** `feature-base`"
+        );
+    }
+
+    #[test]
+    fn preserves_backticks_in_stack_base_branch() {
+        assert_eq!(
+            stack_pr_body("feature`base", "main"),
+            "This pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** ``feature`base``"
+        );
     }
 
     #[test]

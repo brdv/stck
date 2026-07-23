@@ -548,17 +548,19 @@ fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
   base=""
   head=""
+  body=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --base) base="${2:-}"; shift 2 ;;
       --head) head="${2:-}"; shift 2 ;;
       --title) shift 2 ;;
-      --body) shift 2 ;;
+      --body) body="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
   if [[ -n "${STCK_TEST_LOG:-}" ]]; then
-    echo "pr create --base ${base} --head ${head}" >> "${STCK_TEST_LOG}"
+    printf 'pr create --base %s --head %s\npr body --head %s\n%s\n' \
+      "${base}" "${head}" "${head}" "${body}" >> "${STCK_TEST_LOG}"
   fi
   if [[ "${STCK_TEST_PR_CREATE_FAIL_HEAD:-}" == "${head}" ]]; then
     exit 1

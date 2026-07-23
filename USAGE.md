@@ -78,6 +78,7 @@ stck submit --base feature-a
 - Parent auto-discovery currently inspects up to the first 100 open PRs, so `--base` is the reliable override in larger repositories.
 - Use `--base` any time you want to target a stack parent branch explicitly.
 - If the current branch already has a PR, it reports a no-op.
+- New PRs include a compact body identifying their root/child position and base branch.
 
 ### 3. Sync local stack after upstream changes
 

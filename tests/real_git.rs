@@ -56,6 +56,9 @@ fn submit_pushes_a_real_branch_before_creating_its_pr() {
     let gh_log = repo.gh_log();
     assert!(gh_log.contains("pr view feature-submit --json number"));
     assert!(gh_log.contains("pr create --base main --head feature-submit"));
+    assert!(gh_log.contains(
+        "This pull request is part of a stack.\n\n- **Position:** Root\n- **Base:** `main`"
+    ));
 }
 
 #[test]
@@ -85,6 +88,9 @@ fn submit_discovers_a_remote_parent_without_its_local_branch() {
     let gh_log = repo.gh_log();
     assert!(gh_log.contains("pr list --state open --limit 100"));
     assert!(gh_log.contains("pr create --base feature-base --head feature-child"));
+    assert!(gh_log.contains(
+        "This pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** `feature-base`"
+    ));
 }
 
 #[test]

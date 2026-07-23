@@ -14,7 +14,7 @@ fn submit_creates_pr_with_base_override() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ gh pr create --base feature-base --head feature-branch --title feature-branch --body \"\"",
+            "$ gh pr create --base feature-base --head feature-branch --title feature-branch --body \"<stack context>\"",
         ))
         .stdout(predicate::str::contains(
             "Created PR for feature-branch targeting feature-base.",
@@ -22,6 +22,9 @@ fn submit_creates_pr_with_base_override() {
 
     let log = fs::read_to_string(&log_path).expect("submit log should exist");
     assert!(log.contains("pr create --base feature-base --head feature-branch"));
+    assert!(log.contains(
+        "pr body --head feature-branch\nThis pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** `feature-base`"
+    ));
 }
 
 #[test]
@@ -37,8 +40,13 @@ fn submit_defaults_base_to_default_branch() {
             "No --base provided. Defaulting PR base to main.",
         ))
         .stdout(predicate::str::contains(
-            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"\"",
+            "$ gh pr create --base main --head feature-branch --title feature-branch --body \"<stack context>\"",
         ));
+
+    let log = fs::read_to_string(&log_path).expect("submit log should exist");
+    assert!(log.contains(
+        "pr body --head feature-branch\nThis pull request is part of a stack.\n\n- **Position:** Root\n- **Base:** `main`"
+    ));
 }
 
 #[test]
