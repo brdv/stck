@@ -268,3 +268,117 @@ fn push_does_not_reuse_a_real_cached_plan_for_another_stack() {
         "push for stack B must not apply stack A's cached retarget plan"
     );
 }
+
+#[test]
+fn sync_continues_after_a_real_git_conflict_is_resolved() {
+    let repo = RealGitRepo::new();
+    repo.commit_file("shared.txt", "shared\n", "Add shared file");
+    repo.push("main");
+
+    repo.create_branch("feature-conflict");
+    repo.commit_file("shared.txt", "feature\n", "Change shared file on feature");
+    repo.push("feature-conflict");
+    let original_remote_sha = repo.remote_sha("feature-conflict");
+
+    repo.checkout("main");
+    repo.commit_file("shared.txt", "main\n", "Change shared file on main");
+    repo.push("main");
+    repo.checkout("feature-conflict");
+
+    repo.write_pr_response(
+        "feature-conflict",
+        r#"{"number":401,"headRefName":"feature-conflict","baseRefName":"main","state":"OPEN"}"#,
+    );
+    repo.write_children_response("feature-conflict", "[]");
+
+    let mut first = repo.stck_cmd();
+    first.arg("sync");
+    first
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("CONFLICT"))
+        .stderr(predicate::str::contains(
+            "Then run `stck sync --continue` to resume.",
+        ));
+    assert!(
+        repo.sync_state_exists(),
+        "sync state should survive the real rebase conflict"
+    );
+
+    repo.resolve_rebase_conflict("shared.txt", "main\nfeature\n");
+
+    let mut plain_retry = repo.stck_cmd();
+    plain_retry.arg("sync");
+    plain_retry
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "run `stck sync --continue` after completing the rebase",
+        ));
+
+    let mut resume = repo.stck_cmd();
+    resume.args(["sync", "--continue"]);
+    resume.assert().success().stdout(predicate::str::contains(
+        "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
+    ));
+
+    assert!(
+        !repo.sync_state_exists(),
+        "successful continuation should clear sync state"
+    );
+    assert!(repo.is_ancestor("refs/remotes/origin/main", "refs/heads/feature-conflict"));
+    assert_eq!(
+        repo.remote_sha("feature-conflict"),
+        original_remote_sha,
+        "sync continuation must remain local-only"
+    );
+}
+
+#[test]
+fn sync_reset_recomputes_after_a_real_git_rebase_failure() {
+    let repo = RealGitRepo::new();
+    repo.create_branch("feature-reset");
+    repo.commit_file("feature.txt", "feature\n", "Add reset feature");
+    repo.push("feature-reset");
+
+    repo.checkout("main");
+    repo.commit_file("main.txt", "main advanced\n", "Advance main");
+    repo.push("main");
+    repo.checkout("feature-reset");
+
+    repo.write_pr_response(
+        "feature-reset",
+        r#"{"number":402,"headRefName":"feature-reset","baseRefName":"main","state":"OPEN"}"#,
+    );
+    repo.write_children_response("feature-reset", "[]");
+    repo.install_failing_pre_rebase_hook();
+
+    let mut first = repo.stck_cmd();
+    first.arg("sync");
+    first.assert().code(1).stderr(predicate::str::contains(
+        "error: rebase failed for branch feature-reset",
+    ));
+    assert!(
+        repo.sync_state_exists(),
+        "sync state should survive a real Git rebase failure"
+    );
+
+    repo.remove_pre_rebase_hook();
+    let mut reset = repo.stck_cmd();
+    reset.args(["sync", "--reset"]);
+    reset
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Cleared previous sync state. Recomputing from scratch.",
+        ))
+        .stdout(predicate::str::contains(
+            "Sync succeeded locally. Run `stck push` to update remotes + PR bases.",
+        ));
+
+    assert!(
+        !repo.sync_state_exists(),
+        "successful reset should clear sync state"
+    );
+    assert!(repo.is_ancestor("refs/remotes/origin/main", "refs/heads/feature-reset"));
+}

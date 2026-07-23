@@ -916,6 +916,41 @@ exit 1
         }
     }
 
+    pub fn resolve_rebase_conflict(&self, relative_path: &str, contents: &str) {
+        fs::write(self.worktree.join(relative_path), contents)
+            .expect("resolved conflict contents should be written");
+        self.git_success(&["add", "--", relative_path]);
+        self.git_success(&["-c", "core.editor=true", "rebase", "--continue"]);
+    }
+
+    pub fn install_failing_pre_rebase_hook(&self) {
+        write_stub(
+            &self
+                .worktree
+                .join(".git")
+                .join("test-hooks")
+                .join("pre-rebase"),
+            "#!/usr/bin/env bash\nexit 1\n",
+        );
+    }
+
+    pub fn remove_pre_rebase_hook(&self) {
+        let hook = self
+            .worktree
+            .join(".git")
+            .join("test-hooks")
+            .join("pre-rebase");
+        fs::remove_file(hook).expect("pre-rebase hook should be removed");
+    }
+
+    pub fn sync_state_exists(&self) -> bool {
+        self.worktree
+            .join(".git")
+            .join("stck")
+            .join("last-plan.json")
+            .exists()
+    }
+
     pub fn write_pr_response(&self, branch: &str, json: &str) {
         let branch = branch.replace('/', "__");
         fs::write(
