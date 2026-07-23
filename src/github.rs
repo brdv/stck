@@ -42,6 +42,14 @@ pub struct PullRequest {
     pub state: PrState,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenPullRequestHead {
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    #[serde(rename = "isCrossRepository", default)]
+    is_cross_repository: bool,
+}
+
 /// Discover the full linear stack surrounding `current_branch`.
 ///
 /// The returned list is ordered from the stack root to the highest descendant
@@ -185,12 +193,13 @@ pub fn create_pr(base: &str, head: &str, title: &str) -> Result<(), String> {
     }
 }
 
-/// List open pull requests visible to the current repository.
+/// List same-repository head branches for open pull requests.
 ///
 /// This currently relies on `gh pr list --limit 100`, so callers should treat
 /// it as a best-effort discovery source rather than a complete repository-wide
-/// index in very large repositories.
-pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
+/// index in very large repositories. Cross-repository pull requests are
+/// excluded because their head branches are not available through `origin`.
+pub fn list_open_pr_head_branches() -> Result<Vec<String>, String> {
     let output = Command::new("gh")
         .args([
             "pr",
@@ -200,7 +209,7 @@ pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
             "--limit",
             "100",
             "--json",
-            "number,headRefName,baseRefName,state",
+            "headRefName,isCrossRepository",
         ])
         .output()
         .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
@@ -212,7 +221,13 @@ pub fn list_open_prs() -> Result<Vec<PullRequest>, String> {
         ));
     }
 
-    parse_pull_requests_json(&output.stdout)
+    let prs = serde_json::from_slice::<Vec<OpenPullRequestHead>>(&output.stdout)
+        .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())?;
+    Ok(prs
+        .into_iter()
+        .filter(|pr| !pr.is_cross_repository)
+        .map(|pr| pr.head_ref_name)
+        .collect())
 }
 
 fn fetch_pr_for_branch(branch: &str) -> Result<PullRequest, String> {

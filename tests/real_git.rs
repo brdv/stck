@@ -59,6 +59,35 @@ fn submit_pushes_a_real_branch_before_creating_its_pr() {
 }
 
 #[test]
+fn submit_discovers_a_remote_parent_without_its_local_branch() {
+    let repo = RealGitRepo::new();
+    repo.create_branch("feature-base");
+    repo.commit_file("base.txt", "base\n", "Add base feature");
+    repo.push("feature-base");
+
+    repo.create_branch("feature-child");
+    repo.commit_file("child.txt", "child\n", "Add child feature");
+    repo.delete_local_branch("feature-base");
+    repo.write_open_prs_response(r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#);
+
+    let mut cmd = repo.stck_cmd();
+    cmd.arg("submit");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No --base provided. Detected stack parent: feature-base.",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base feature-base --head feature-child",
+        ));
+
+    let gh_log = repo.gh_log();
+    assert!(gh_log.contains("pr list --state open --limit 100"));
+    assert!(gh_log.contains("pr create --base feature-base --head feature-child"));
+}
+
+#[test]
 fn sync_rebases_a_real_linear_stack_after_main_advances() {
     let repo = RealGitRepo::new();
 

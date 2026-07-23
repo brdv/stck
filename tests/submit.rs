@@ -69,6 +69,75 @@ fn submit_fails_when_parent_discovery_errors() {
 }
 
 #[test]
+fn submit_fails_when_parent_candidate_refs_are_missing() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-submit-missing-parent-refs.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env("STCK_TEST_MISSING_LOCAL_BRANCH_REF", "feature-base");
+    cmd.env("STCK_TEST_MISSING_REMOTE_BRANCH", "feature-base");
+    cmd.env(
+        "STCK_TEST_OPEN_PRS_JSON",
+        r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#,
+    );
+    cmd.arg("submit");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: could not auto-detect stack parent for feature-branch: could not resolve branch `feature-base` from `origin` or local refs; retry or pass `--base <branch>` explicitly",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("submit log should exist");
+    assert!(
+        !log.contains("pr create"),
+        "submit must not fall back to main when a parent candidate cannot be resolved"
+    );
+}
+
+#[test]
+fn submit_fails_when_parent_ancestry_check_errors() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-submit-ancestry-error.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env(
+        "STCK_TEST_ANCESTRY_ERROR_PAIRS",
+        "feature-base:feature-branch",
+    );
+    cmd.env(
+        "STCK_TEST_OPEN_PRS_JSON",
+        r#"[{"headRefName":"feature-base","isCrossRepository":false}]"#,
+    );
+    cmd.arg("submit");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: could not auto-detect stack parent for feature-branch: failed to check ancestry between `refs/remotes/origin/feature-base` and `refs/heads/feature-branch`; retry or pass `--base <branch>` explicitly",
+    ));
+
+    let log = fs::read_to_string(&log_path).expect("submit log should exist");
+    assert!(
+        !log.contains("pr create"),
+        "submit must not fall back to main when ancestry cannot be verified"
+    );
+}
+
+#[test]
+fn submit_ignores_cross_repository_parent_candidates() {
+    let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    cmd.env(
+        "STCK_TEST_OPEN_PRS_JSON",
+        r#"[{"headRefName":"fork-feature","isCrossRepository":true}]"#,
+    );
+    cmd.arg("submit");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No --base provided. Defaulting PR base to main.",
+        ))
+        .stdout(predicate::str::contains(
+            "$ gh pr create --base main --head feature-branch",
+        ));
+}
+
+#[test]
 fn submit_explicit_base_overrides_parent_discovery() {
     let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
     let log_path = log_path(&temp, "stck-submit-explicit-override.log");

@@ -52,6 +52,26 @@ pub fn resolve_onto_ref(base_branch: &str) -> Result<String, String> {
     resolve_base_ref(base_branch)
 }
 
+/// Resolve a branch through its fetched `origin` ref, then its local ref.
+///
+/// Parent discovery uses this to avoid stale or missing local branches while
+/// retaining a fallback for clones without the corresponding tracking ref.
+pub fn resolve_branch_ref_remote_first(branch: &str) -> Result<String, String> {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    if ref_exists(&remote_ref)? {
+        return Ok(remote_ref);
+    }
+
+    let local_ref = format!("refs/heads/{branch}");
+    if ref_exists(&local_ref)? {
+        return Ok(local_ref);
+    }
+
+    Err(format!(
+        "could not resolve branch `{branch}` from `origin` or local refs"
+    ))
+}
+
 /// Resolve the fork point to use as the old base for `git rebase --onto`.
 ///
 /// This prefers the merge-base between `branch` and `base_branch` so sync can
