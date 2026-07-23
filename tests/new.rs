@@ -141,11 +141,11 @@ fn new_prefers_remote_parent_when_local_parent_has_drifted() {
 #[test]
 fn new_fails_when_targeted_parent_query_errors() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
-    cmd.env("STCK_TEST_PR_LIST_FAIL", "1");
+    cmd.env("STCK_TEST_PR_LIST_FAIL_HEAD", "feature-base");
     cmd.args(["new", "feature-next"]);
 
     cmd.assert().code(1).stderr(predicate::str::contains(
-        "error: could not auto-detect stack parent for feature-branch: failed to query open pull request for branch feature-base; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
+        "error: could not auto-detect stack parent for feature-branch: failed to check PR for branch feature-base; ensure `gh auth status` succeeds and retry; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
     ));
 }
 

@@ -50,6 +50,29 @@ struct OpenPullRequestHead {
     is_cross_repository: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct PullRequestCandidate {
+    number: u64,
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    #[serde(rename = "baseRefName")]
+    base_ref_name: String,
+    state: PrState,
+    #[serde(rename = "isCrossRepository", default)]
+    is_cross_repository: bool,
+}
+
+impl From<PullRequestCandidate> for PullRequest {
+    fn from(candidate: PullRequestCandidate) -> Self {
+        Self {
+            number: candidate.number,
+            head_ref_name: candidate.head_ref_name,
+            base_ref_name: candidate.base_ref_name,
+            state: candidate.state,
+        }
+    }
+}
+
 /// Discover the full linear stack surrounding `current_branch`.
 ///
 /// The returned list is ordered from the stack root to the highest descendant
@@ -143,35 +166,42 @@ pub fn retarget_pr_base(branch: &str, new_base: &str) -> Result<(), String> {
     }
 }
 
-/// Return whether a pull request already exists for `branch`.
+/// Return whether an open same-repository pull request exists for `branch`.
 ///
-/// "No pull request found" responses are treated as `Ok(false)`. Other `gh`
-/// failures are surfaced as actionable errors.
+/// An empty structured result is treated as `Ok(false)`. Other `gh` failures
+/// are surfaced as actionable errors. Cross-repository results with the same
+/// head name are ignored.
 pub fn pr_exists_for_head(branch: &str) -> Result<bool, String> {
     let output = Command::new("gh")
-        .args(["pr", "view", branch, "--json", "number"])
+        .args([
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "headRefName,isCrossRepository",
+        ])
         .output()
-        .map_err(|_| "failed to run `gh pr view`; ensure GitHub CLI is installed".to_string())?;
+        .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
 
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(_) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-            if stderr.contains("no pull requests found")
-                || stderr.contains("could not resolve to a pull request")
-            {
-                Ok(false)
-            } else {
-                Err(with_stderr(
-                    &format!(
-                        "failed to check PR for branch {branch}; ensure `gh auth status` succeeds and retry"
-                    ),
-                    &output.stderr,
-                ))
-            }
-        }
-        None => Err("failed to determine PR presence for branch".to_string()),
+    if !output.status.success() {
+        return Err(with_stderr(
+            &format!(
+                "failed to check PR for branch {branch}; ensure `gh auth status` succeeds and retry"
+            ),
+            &output.stderr,
+        ));
     }
+
+    let prs = serde_json::from_slice::<Vec<OpenPullRequestHead>>(&output.stdout)
+        .map_err(|_| format!("failed to parse PR lookup metadata for branch {branch}"))?;
+    Ok(prs
+        .iter()
+        .any(|pr| !pr.is_cross_repository && pr.head_ref_name == branch))
 }
 
 /// Create a pull request with the given base, head, title, and body.
@@ -216,12 +246,7 @@ fn markdown_code_span(value: &str) -> String {
     format!("{fence}{value}{fence}")
 }
 
-/// Return whether `branch` is the head of an open same-repository pull request.
-///
-/// This uses a targeted query so parent discovery does not depend on a bounded
-/// repository-wide PR listing. Cross-repository results are excluded because
-/// their head branches are not available through `origin`.
-pub fn has_open_pr_for_head(branch: &str) -> Result<bool, String> {
+fn fetch_pr_for_branch(branch: &str) -> Result<PullRequest, String> {
     let output = Command::new("gh")
         .args([
             "pr",
@@ -229,58 +254,58 @@ pub fn has_open_pr_for_head(branch: &str) -> Result<bool, String> {
             "--head",
             branch,
             "--state",
-            "open",
+            "all",
             "--limit",
-            "1",
+            "100",
             "--json",
-            "headRefName,isCrossRepository",
+            "number,headRefName,baseRefName,state,isCrossRepository",
         ])
         .output()
         .map_err(|_| "failed to run `gh pr list`; ensure GitHub CLI is installed".to_string())?;
 
     if !output.status.success() {
         return Err(with_stderr(
-            &format!("failed to query open pull request for branch {branch}"),
-            &output.stderr,
-        ));
-    }
-
-    let prs = serde_json::from_slice::<Vec<OpenPullRequestHead>>(&output.stdout)
-        .map_err(|_| "failed to parse PR metadata from GitHub CLI output".to_string())?;
-    Ok(prs
-        .iter()
-        .any(|pr| !pr.is_cross_repository && pr.head_ref_name == branch))
-}
-
-fn fetch_pr_for_branch(branch: &str) -> Result<PullRequest, String> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "number,headRefName,baseRefName,state",
-        ])
-        .output()
-        .map_err(|_| "failed to run `gh pr view`; ensure GitHub CLI is installed".to_string())?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-        if stderr.contains("no pull requests found")
-            || stderr.contains("could not resolve to a pull request")
-        {
-            return Err(format!(
-                "no PR found for branch {branch}; create a PR first"
-            ));
-        }
-        return Err(with_stderr(
             &format!("failed to fetch PR for branch {branch}"),
             &output.stderr,
         ));
     }
 
-    serde_json::from_slice::<PullRequest>(&output.stdout)
-        .map_err(|_| format!("failed to parse PR metadata for branch {branch}"))
+    let candidates = serde_json::from_slice::<Vec<PullRequestCandidate>>(&output.stdout)
+        .map_err(|_| format!("failed to parse PR metadata for branch {branch}"))?;
+    select_pr_for_head(candidates, branch)
+}
+
+fn select_pr_for_head(
+    candidates: Vec<PullRequestCandidate>,
+    branch: &str,
+) -> Result<PullRequest, String> {
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|pr| !pr.is_cross_repository && pr.head_ref_name == branch)
+        .collect::<Vec<_>>();
+
+    let open_count = candidates
+        .iter()
+        .filter(|pr| pr.state == PrState::Open)
+        .count();
+    if open_count > 1 {
+        return Err(format!(
+            "multiple open PRs found for branch {branch}; close duplicates before retrying"
+        ));
+    }
+    if open_count == 1 {
+        let index = candidates
+            .iter()
+            .position(|pr| pr.state == PrState::Open)
+            .ok_or_else(|| format!("failed to select open PR for branch {branch}"))?;
+        return Ok(candidates.swap_remove(index).into());
+    }
+
+    candidates
+        .into_iter()
+        .next()
+        .map(Into::into)
+        .ok_or_else(|| format!("no PR found for branch {branch}; create a PR first"))
 }
 
 fn fetch_children_for_base(branch: &str) -> Result<Vec<PullRequest>, String> {
@@ -409,7 +434,10 @@ pub fn build_linear_stack(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_linear_stack, stack_pr_body, PrState, PullRequest};
+    use super::{
+        build_linear_stack, select_pr_for_head, stack_pr_body, PrState, PullRequest,
+        PullRequestCandidate,
+    };
 
     fn pr(number: u64, head: &str, base: &str) -> PullRequest {
         PullRequest {
@@ -417,6 +445,16 @@ mod tests {
             head_ref_name: head.to_string(),
             base_ref_name: base.to_string(),
             state: PrState::Open,
+        }
+    }
+
+    fn candidate(number: u64, head: &str, base: &str, state: PrState) -> PullRequestCandidate {
+        PullRequestCandidate {
+            number,
+            head_ref_name: head.to_string(),
+            base_ref_name: base.to_string(),
+            state,
+            is_cross_repository: false,
         }
     }
 
@@ -441,6 +479,46 @@ mod tests {
         assert_eq!(
             stack_pr_body("feature`base", "main"),
             "This pull request is part of a stack.\n\n- **Position:** Child\n- **Base:** ``feature`base``"
+        );
+    }
+
+    #[test]
+    fn structured_head_lookup_prefers_open_pr_over_history() {
+        let selected = select_pr_for_head(
+            vec![
+                candidate(100, "feature", "old-base", PrState::Merged),
+                candidate(101, "feature", "main", PrState::Open),
+            ],
+            "feature",
+        )
+        .expect("open PR should be selected");
+
+        assert_eq!(selected.number, 101);
+        assert_eq!(selected.base_ref_name, "main");
+    }
+
+    #[test]
+    fn structured_head_lookup_reports_empty_results() {
+        let error =
+            select_pr_for_head(Vec::new(), "feature").expect_err("empty lookup should fail");
+
+        assert_eq!(error, "no PR found for branch feature; create a PR first");
+    }
+
+    #[test]
+    fn structured_head_lookup_rejects_multiple_open_prs() {
+        let error = select_pr_for_head(
+            vec![
+                candidate(100, "feature", "main", PrState::Open),
+                candidate(101, "feature", "release", PrState::Open),
+            ],
+            "feature",
+        )
+        .expect_err("ambiguous lookup should fail");
+
+        assert_eq!(
+            error,
+            "multiple open PRs found for branch feature; close duplicates before retrying"
         );
     }
 

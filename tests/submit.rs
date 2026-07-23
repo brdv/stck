@@ -68,11 +68,11 @@ fn submit_falls_back_to_default_when_no_parent_pr() {
 #[test]
 fn submit_fails_when_targeted_parent_query_errors() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
-    cmd.env("STCK_TEST_PR_LIST_FAIL", "1");
+    cmd.env("STCK_TEST_PR_LIST_FAIL_HEAD", "feature-base");
     cmd.arg("submit");
 
     cmd.assert().code(1).stderr(predicate::str::contains(
-        "error: could not auto-detect stack parent for feature-branch: failed to query open pull request for branch feature-base; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
+        "error: could not auto-detect stack parent for feature-branch: failed to check PR for branch feature-base; ensure `gh auth status` succeeds and retry; stderr: failed to list pull requests; retry or pass `--base <branch>` explicitly",
     ));
 }
 
@@ -197,7 +197,7 @@ fn submit_discovers_parent_base_for_stacked_branch() {
 
     let log = fs::read_to_string(&log_path).expect("submit log should exist");
     assert!(log.contains(
-        "pr list --head feature-base --state open --limit 1 --json headRefName,isCrossRepository"
+        "pr list --head feature-base --state open --limit 100 --json headRefName,isCrossRepository"
     ));
     assert!(
         !log.contains("pr list --state open --limit 100"),
