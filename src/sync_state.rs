@@ -31,6 +31,9 @@ pub struct PushState {
     pub push_branches: Vec<String>,
     /// Number of branch pushes that completed successfully.
     pub completed_pushes: usize,
+    /// Remote branch tips captured by the sync that authorized rewritten pushes.
+    #[serde(default)]
+    pub(crate) sync_push_leases: Vec<RemoteBranchLease>,
     /// PR base retarget operations to run after the branch pushes succeed.
     pub retargets: Vec<RetargetStep>,
     /// Number of retarget operations that completed successfully.
@@ -49,25 +52,46 @@ pub struct LastSyncPlan {
     pub retargets: Vec<RetargetStep>,
 }
 
+/// Expected remote state captured before sync rewrites a local branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RemoteBranchLease {
+    /// Local branch whose rewritten history may be pushed.
+    pub(crate) branch: String,
+    /// Fetched remote tip expected at push time, or `None` when it was absent.
+    pub(crate) expected_remote_head: Option<String>,
+}
+
 /// Identity required before a cached sync plan can be reused by `stck push`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SyncPlanScope {
     repository: String,
     stack: Vec<PullRequest>,
+    #[serde(default)]
+    push_leases: Vec<RemoteBranchLease>,
 }
 
 impl SyncPlanScope {
-    /// Capture the repository and exact ordered PR metadata for a sync plan.
-    pub(crate) fn new(repository: &str, stack: &[PullRequest]) -> Self {
+    /// Capture the repository, ordered PR metadata, and remote tips for a sync plan.
+    pub(crate) fn new(
+        repository: &str,
+        stack: &[PullRequest],
+        push_leases: Vec<RemoteBranchLease>,
+    ) -> Self {
         Self {
             repository: repository.to_string(),
             stack: stack.to_vec(),
+            push_leases,
         }
     }
 
     /// Return whether this scope still describes the current repository stack.
     pub(crate) fn matches(&self, repository: &str, stack: &[PullRequest]) -> bool {
         self.repository == repository && self.stack == stack
+    }
+
+    /// Return the remote tips that must still match before rewritten pushes.
+    pub(crate) fn push_leases(&self) -> &[RemoteBranchLease] {
+        &self.push_leases
     }
 }
 
@@ -84,6 +108,14 @@ impl LastSyncPlan {
                 .scope
                 .as_ref()
                 .is_some_and(|scope| scope.matches(repository, stack))
+    }
+
+    /// Return the sync-time remote tips associated with this cached plan.
+    pub(crate) fn push_leases(&self) -> &[RemoteBranchLease] {
+        self.scope
+            .as_ref()
+            .map(SyncPlanScope::push_leases)
+            .unwrap_or_default()
     }
 }
 
@@ -244,7 +276,20 @@ mod tests {
     }
 
     fn scope() -> SyncPlanScope {
-        SyncPlanScope::new("example/stck", &stack())
+        SyncPlanScope::new(
+            "example/stck",
+            &stack(),
+            vec![
+                RemoteBranchLease {
+                    branch: "feature-b".to_string(),
+                    expected_remote_head: Some("bbbb1234".to_string()),
+                },
+                RemoteBranchLease {
+                    branch: "feature-c".to_string(),
+                    expected_remote_head: None,
+                },
+            ],
+        )
     }
 
     #[test]
@@ -292,6 +337,7 @@ mod tests {
         let state = PushState {
             push_branches: vec!["feature-b".to_string(), "feature-c".to_string()],
             completed_pushes: 1,
+            sync_push_leases: scope().push_leases().to_vec(),
             retargets: vec![RetargetStep {
                 branch: "feature-b".to_string(),
                 new_base_ref: "main".to_string(),
@@ -308,6 +354,7 @@ mod tests {
             LastPlanState::Push(p) => {
                 assert_eq!(p.push_branches, vec!["feature-b", "feature-c"]);
                 assert_eq!(p.completed_pushes, 1);
+                assert_eq!(p.sync_push_leases, scope().push_leases());
                 assert_eq!(p.retargets.len(), 1);
                 assert_eq!(p.retargets[0].branch, "feature-b");
                 assert_eq!(p.completed_retargets, 0);
@@ -356,6 +403,7 @@ mod tests {
         let push = LastPlanState::Push(PushState {
             push_branches: vec![],
             completed_pushes: 0,
+            sync_push_leases: vec![],
             retargets: vec![],
             completed_retargets: 0,
         });

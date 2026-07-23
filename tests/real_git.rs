@@ -132,7 +132,7 @@ fn status_and_push_handle_a_missing_remote_branch() {
     push.assert()
         .success()
         .stdout(predicate::str::contains(
-            "$ git push --force-with-lease origin feature-missing-remote",
+            "$ git push --force-with-lease=refs/heads/feature-missing-remote: origin feature-missing-remote",
         ))
         .stdout(predicate::str::contains(
             "Push succeeded. Pushed 1 branch(es) and applied 0 PR base update(s) in this run.",
@@ -145,7 +145,7 @@ fn status_and_push_handle_a_missing_remote_branch() {
 }
 
 #[test]
-fn sync_rebases_a_real_linear_stack_after_main_advances() {
+fn sync_then_push_rewrites_a_real_linear_stack_with_captured_leases() {
     let repo = RealGitRepo::new();
 
     repo.create_branch("feature-base");
@@ -199,6 +199,29 @@ fn sync_rebases_a_real_linear_stack_after_main_advances() {
     assert_ne!(repo.local_sha("refs/heads/feature-child"), old_child_sha);
     assert_eq!(repo.remote_sha("feature-base"), old_base_sha);
     assert_eq!(repo.remote_sha("feature-child"), old_child_sha);
+
+    let mut push = repo.stck_cmd();
+    push.arg("push");
+    push.assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "$ git push --force-with-lease=refs/heads/feature-base:{old_base_sha} origin feature-base"
+        )))
+        .stdout(predicate::str::contains(format!(
+            "$ git push --force-with-lease=refs/heads/feature-child:{old_child_sha} origin feature-child"
+        )))
+        .stdout(predicate::str::contains(
+            "Push succeeded. Pushed 2 branch(es) and applied 0 PR base update(s) in this run.",
+        ));
+
+    assert_eq!(
+        repo.remote_sha("feature-base"),
+        repo.local_sha("refs/heads/feature-base")
+    );
+    assert_eq!(
+        repo.remote_sha("feature-child"),
+        repo.local_sha("refs/heads/feature-child")
+    );
 }
 
 #[test]

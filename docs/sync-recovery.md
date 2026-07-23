@@ -13,7 +13,8 @@ A fresh `stck sync`:
 
 1. refuses to start while a native Git rebase is already in progress,
 2. fetches `origin` and computes the current stack plan,
-3. saves that plan under `.git/stck/` before running its first rebase,
+3. saves that plan and the fetched remote tips it may rewrite under `.git/stck/`
+   before running its first rebase,
 4. records progress after every completed step.
 
 If a rebase fails, `stck` records the failed step and the branch head at which
@@ -61,9 +62,14 @@ so `git rebase --abort` must finish first.
 - In-flight sync progress lives in `.git/stck/last-plan.json`.
 - `stck push` is blocked while sync state remains unresolved.
 - A successful sync clears in-flight state and saves a stack-scoped retarget
-  plan in `.git/stck/last-sync-plan.json`.
+  plan plus the pre-rebase remote tips in `.git/stck/last-sync-plan.json`.
 - `stck push` reuses that cached plan only when its repository and exact stack
   metadata still match.
+- Rewritten branches use the sync-time tips as exact force-with-lease
+  expectations. Sync refuses to authorize a rewrite when the fetched remote
+  already has commits missing locally. If a remote changes after sync, push
+  stops instead of overwriting that change; integrate it locally and rerun
+  sync.
 - A no-op sync clears any stale cached retarget plan.
 - Sync recovery never pushes branches or mutates pull requests; `stck push`
   remains the explicit remote mutation step.

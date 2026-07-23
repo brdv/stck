@@ -6,7 +6,9 @@ use crate::env;
 use crate::github;
 use crate::gitops;
 use crate::stack;
-use crate::sync_state::{self, LastSyncPlan, PushState, SyncPlanScope, SyncState};
+use crate::sync_state::{
+    self, LastSyncPlan, PushState, RemoteBranchLease, SyncPlanScope, SyncState,
+};
 
 /// Print the detected stack, its PR state, and any local follow-up actions.
 pub(crate) fn run_status(preflight: &env::PreflightContext) -> ExitCode {
@@ -408,6 +410,31 @@ pub(crate) fn run_submit(
     ExitCode::SUCCESS
 }
 
+fn capture_remote_branch_leases(branches: &[String]) -> Result<Vec<RemoteBranchLease>, String> {
+    branches
+        .iter()
+        .map(|branch| {
+            let expected_remote_head = gitops::remote_branch_head(branch)?;
+            if expected_remote_head.is_some()
+                && !gitops::is_ancestor(
+                    &format!("refs/remotes/origin/{branch}"),
+                    &format!("refs/heads/{branch}"),
+                )?
+            {
+                return Err(format!(
+                    "remote branch `origin/{branch}` has commits not in local `{branch}`; \
+                     pull or rebase to integrate remote changes before syncing"
+                ));
+            }
+
+            Ok(RemoteBranchLease {
+                branch: branch.clone(),
+                expected_remote_head,
+            })
+        })
+        .collect()
+}
+
 /// Rebase the current stacked branch and its descendants onto the correct bases.
 ///
 /// This command supports resumable operation state via `sync_state`, including
@@ -515,12 +542,27 @@ pub(crate) fn run_sync(
                 return ExitCode::SUCCESS;
             }
 
+            let lease_branches = steps
+                .iter()
+                .map(|step| step.branch.clone())
+                .collect::<Vec<_>>();
+            let push_leases = match capture_remote_branch_leases(&lease_branches) {
+                Ok(push_leases) => push_leases,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(1);
+                }
+            };
             let state = SyncState {
                 steps,
                 completed_steps: 0,
                 failed_step: None,
                 failed_step_branch_head: None,
-                plan_scope: Some(SyncPlanScope::new(&preflight.repository, &stack)),
+                plan_scope: Some(SyncPlanScope::new(
+                    &preflight.repository,
+                    &stack,
+                    push_leases,
+                )),
             };
             if let Err(message) = sync_state::save_sync(&state) {
                 eprintln!("error: {message}");
@@ -777,18 +819,25 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
-            let retargets = if let Some(plan) = cached_plan {
+            let (retargets, sync_push_leases) = if let Some(plan) = cached_plan {
                 if plan.matches(&preflight.repository, &preflight.default_branch, &stack) {
-                    plan.retargets
+                    let push_leases = plan.push_leases().to_vec();
+                    (plan.retargets, push_leases)
                 } else {
                     if let Err(message) = sync_state::clear_last_sync_plan() {
                         eprintln!("error: {message}");
                         return ExitCode::from(1);
                     }
-                    stack::build_push_retargets(&stack, &preflight.default_branch)
+                    (
+                        stack::build_push_retargets(&stack, &preflight.default_branch),
+                        Vec::new(),
+                    )
                 }
             } else {
-                stack::build_push_retargets(&stack, &preflight.default_branch)
+                (
+                    stack::build_push_retargets(&stack, &preflight.default_branch),
+                    Vec::new(),
+                )
             };
             let retargets = stack::filter_pending_retargets(retargets, &stack);
             let mut push_branches = Vec::new();
@@ -809,6 +858,7 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             let state = PushState {
                 push_branches,
                 completed_pushes: 0,
+                sync_push_leases,
                 retargets,
                 completed_retargets: 0,
             };
@@ -819,41 +869,87 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             state
         }
     };
-    let starting_completed_pushes = state.completed_pushes;
     let starting_completed_retargets = state.completed_retargets;
+    let mut pushed_this_run = 0;
 
     for index in state.completed_pushes..state.push_branches.len() {
-        let branch = &state.push_branches[index];
-
+        let branch = state.push_branches[index].clone();
         let remote_ref = format!("refs/remotes/origin/{branch}");
         let local_ref = format!("refs/heads/{branch}");
-        let remote_exists = match gitops::remote_branch_exists(branch) {
-            Ok(exists) => exists,
+        let local_head = match gitops::resolve_ref(&local_ref) {
+            Ok(head) => head,
             Err(message) => {
                 eprintln!("error: {message}");
                 return ExitCode::from(1);
             }
         };
-        if remote_exists {
-            match gitops::is_ancestor(&remote_ref, &local_ref) {
-                Ok(true) => {}
-                Ok(false) => {
-                    if let Err(save_error) = sync_state::save_push(&state) {
-                        eprintln!("error: {save_error}");
+        let remote_head = match gitops::remote_branch_head(&branch) {
+            Ok(head) => head,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+        };
+
+        if remote_head.as_deref() == Some(local_head.as_str()) {
+            println!("Branch {branch} already matches origin; skipping.");
+            state.completed_pushes = index + 1;
+            if let Err(message) = sync_state::save_push(&state) {
+                eprintln!("error: {message}");
+                return ExitCode::from(1);
+            }
+            continue;
+        }
+
+        let sync_expected_remote_head = state
+            .sync_push_leases
+            .iter()
+            .find(|lease| lease.branch == branch)
+            .map(|lease| lease.expected_remote_head.clone());
+        let expected_remote_head = match sync_expected_remote_head {
+            Some(expected_remote_head) => {
+                if remote_head != expected_remote_head {
+                    if let Err(clear_error) = sync_state::clear() {
+                        eprintln!("error: {clear_error}");
                         return ExitCode::from(1);
                     }
+                    if let Err(clear_error) = sync_state::clear_last_sync_plan() {
+                        eprintln!("error: {clear_error}");
+                        return ExitCode::from(1);
+                    }
+                    let expected = expected_remote_head.as_deref().unwrap_or("missing");
+                    let found = remote_head.as_deref().unwrap_or("missing");
                     eprintln!(
-                        "error: remote branch `origin/{branch}` has commits not in local `{branch}`; \
-                         pull or rebase to integrate remote changes before pushing"
+                        "error: remote branch `origin/{branch}` changed since sync; expected {expected}, found {found}; integrate the remote changes locally, then rerun `stck sync` before pushing"
                     );
                     return ExitCode::from(1);
                 }
-                Err(message) => {
-                    eprintln!("error: {message}");
-                    return ExitCode::from(1);
-                }
+                expected_remote_head
             }
-        }
+            None => {
+                if remote_head.is_some() {
+                    match gitops::is_ancestor(&remote_ref, &local_ref) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            if let Err(save_error) = sync_state::save_push(&state) {
+                                eprintln!("error: {save_error}");
+                                return ExitCode::from(1);
+                            }
+                            eprintln!(
+                                "error: remote branch `origin/{branch}` has commits not in local `{branch}`; \
+                                 pull or rebase to integrate remote changes before pushing"
+                            );
+                            return ExitCode::from(1);
+                        }
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(1);
+                        }
+                    }
+                }
+                remote_head
+            }
+        };
 
         println!(
             "Pushing branch {}/{}: {}",
@@ -861,8 +957,14 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
             state.push_branches.len(),
             branch
         );
-        println!("$ git push --force-with-lease origin {branch}");
-        if let Err(message) = gitops::push_force_with_lease(branch) {
+        let lease = format!(
+            "--force-with-lease=refs/heads/{branch}:{}",
+            expected_remote_head.as_deref().unwrap_or_default()
+        );
+        println!("$ git push {lease} origin {branch}");
+        if let Err(message) =
+            gitops::push_force_with_lease(&branch, expected_remote_head.as_deref())
+        {
             if let Err(save_error) = sync_state::save_push(&state) {
                 eprintln!("error: {save_error}");
                 return ExitCode::from(1);
@@ -874,6 +976,7 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
         }
 
         state.completed_pushes = index + 1;
+        pushed_this_run += 1;
         if let Err(message) = sync_state::save_push(&state) {
             eprintln!("error: {message}");
             return ExitCode::from(1);
@@ -919,9 +1022,6 @@ pub(crate) fn run_push(preflight: &env::PreflightContext) -> ExitCode {
         eprintln!("error: {message}");
         return ExitCode::from(1);
     }
-    let pushed_this_run = state
-        .completed_pushes
-        .saturating_sub(starting_completed_pushes);
     let retargeted_this_run = state
         .completed_retargets
         .saturating_sub(starting_completed_retargets);

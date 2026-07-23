@@ -61,6 +61,28 @@ fn sync_uses_remote_old_base_when_local_old_base_is_missing() {
 }
 
 #[test]
+fn sync_refuses_to_authorize_rewriting_remote_only_commits() {
+    let (temp, mut cmd) = stck_cmd_with_stubbed_tools();
+    let log_path = log_path(&temp, "stck-sync-diverged-remote.log");
+    cmd.env("STCK_TEST_LOG", log_path.as_os_str());
+    cmd.env(
+        "STCK_TEST_NOT_ANCESTOR_PAIRS",
+        "feature-branch:feature-branch",
+    );
+    cmd.arg("sync");
+
+    cmd.assert().code(1).stderr(predicate::str::contains(
+        "error: remote branch `origin/feature-branch` has commits not in local `feature-branch`; pull or rebase to integrate remote changes before syncing",
+    ));
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("rebase --onto"),
+        "sync must not rewrite a branch whose remote contains unintegrated commits"
+    );
+}
+
+#[test]
 fn sync_surfaces_rebase_failure_with_guidance() {
     let (_temp, mut cmd) = stck_cmd_with_stubbed_tools();
     cmd.env("STCK_TEST_REBASE_FAIL", "1");
